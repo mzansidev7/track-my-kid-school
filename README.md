@@ -1,4 +1,29 @@
-# React + Vite
+# Track My Kid School Portal
+
+## Local setup
+
+Create a `.env` file in this project when the API is not running on the default
+local port:
+
+```env
+VITE_API_URL=http://localhost:3000
+VITE_GEOAPIFY_API_KEY=your-geoapify-key
+```
+
+The server sends school registration invitations to the URL configured by
+`SCHOOL_WEB_APP_URL`. For local development, set it in the server environment:
+
+```env
+SCHOOL_WEB_APP_URL=http://localhost:5173
+```
+
+The mobile app's school registration form requests the invitation. The email
+opens `/register?email=...`, where the school completes registration. After
+registration, the school signs in at `/login`.
+
+The registration map uses Geoapify autocomplete, map tiles, reverse geocoding,
+and routing. Restrict the Geoapify key to the school portal domain before
+deploying.
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

@@ -1,0 +1,303 @@
+.portal-main {
+  background: #071a3d;
+}
+
+.portal-topbar {
+  min-height: 54px;
+  padding: 0 30px;
+  border-bottom: 1px solid rgba(191, 219, 254, 0.28);
+  background: #071a3d;
+  box-shadow: 0 5px 20px rgba(2, 24, 58, 0.1);
+}
+
+.portal-breadcrumb,
+.portal-search input {
+  font-size: 12px;
+}
+
+.portal-search{
+  background: "white" !important;
+
+}
+
+.top-profile strong {
+  font-size: 12px;
+}
+
+.top-profile small {
+  font-size: 10px;
+}
+
+.profile-menu {
+  position: relative;
+}
+
+.profile-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-trigger:hover strong,
+.profile-trigger:focus-visible strong {
+  color: #16834a;
+}
+
+.profile-dropdown {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 12px);
+  right: 0;
+  width: 190px;
+  padding: 8px;
+  border: 1px solid #cfe0f4;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(2, 24, 58, 0.2);
+}
+
+.profile-dropdown-heading {
+  padding: 7px 9px 9px;
+  border-bottom: 1px solid #e5edf7;
+  color: #64748b;
+  font-size: 9px;
+}
+
+.profile-dropdown-heading strong {
+  display: block;
+  margin-top: 3px;
+  color: #102a52;
+  font-size: 10px;
+}
+
+.profile-logout {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: 7px;
+  padding: 9px;
+  background: transparent;
+  color: #b42318;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-logout:hover,
+.profile-logout:focus-visible {
+  background: #fff1f0;
+}
+
+.portal-content {
+  width: 100%;
+  max-width: none;
+  padding: 20px 28px 34px;
+}
+
+.school-hero {
+  min-height: 86px;
+}
+
+.school-logo {
+  width: 68px;
+  height: 68px;
+  border-color: #dbeafe;
+  box-shadow: 0 8px 18px rgba(2, 24, 58, 0.18);
+}
+
+.school-logo-image {
+  width: 68px;
+  height: 68px;
+  border: 5px solid #dbeafe;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 8px 18px rgba(2, 24, 58, 0.18);
+}
+
+.school-identity h1 {
+  color: #eff6ff;
+  font-size: 28px;
+}
+
+.school-identity p,
+.school-meta {
+  color: #b8c9e2;
+}
+
+.school-identity p {
+  font-size: 12px;
+}
+
+.school-meta {
+  font-size: 11px;
+}
+
+.school-tabs {
+  gap: 28px;
+  margin-top: 15px;
+  border-bottom-color: rgba(191, 219, 254, 0.28);
+}
+
+.school-tabs a {
+  padding-bottom: 12px;
+  color: #b8c9e2;
+  font-size: 12px;
+}
+
+.school-tabs a:hover,
+.school-tabs a.active {
+  color: #86efac;
+}
+
+.metrics-grid {
+  gap: 16px;
+  margin: 18px 0;
+}
+
+.metric-card,
+.dashboard-panel {
+  border: 1px solid #a9c6e8;
+  background: linear-gradient(145deg, #eaf3ff 0%, #dbeafe 100%);
+  box-shadow: 0 10px 24px rgba(2, 24, 58, 0.16);
+}
+
+.metric-card {
+  min-height: 100px;
+  padding: 14px;
+}
+
+.metric-card > span,
+.metric-card > small,
+.trip-row,
+.announcement-row p,
+.announcement-row small,
+.attendance-stats span,
+.info-grid span {
+  color: #526b8c;
+}
+
+.metric-card > span {
+  font-size: 12px;
+}
+
+.metric-card > strong {
+  font-size: 25px;
+}
+
+.metric-card > small {
+  font-size: 11px;
+}
+
+.metric-card > a {
+  margin-top: 12px;
+  font-size: 11px;
+}
+
+.metric-card > strong,
+.panel-heading h2,
+.trip-name strong,
+.announcement-row strong,
+.attendance-stats strong,
+.info-grid strong {
+  color: #102a52;
+}
+
+.dashboard-grid {
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.dashboard-panel {
+  padding: 15px;
+}
+
+.panel-heading {
+  margin-bottom: 10px;
+}
+
+.panel-heading h2 {
+  font-size: 15px;
+}
+
+.panel-heading a {
+  font-size: 11px;
+}
+
+.trip-list,
+.announcement-list {
+  border-top-color: #c5d9f1;
+}
+
+.trip-row,
+.announcement-row {
+  border-bottom-color: #c5d9f1;
+}
+
+.trip-row {
+  min-height: 43px;
+  font-size: 11px;
+}
+
+.trip-name strong {
+  font-size: 11px;
+}
+
+.trip-name small {
+  font-size: 10px;
+}
+
+.on-trip {
+  font-size: 9px;
+}
+
+.announcement-row {
+  padding: 11px 0;
+}
+
+.announcement-row strong {
+  font-size: 11px;
+}
+
+.announcement-row p,
+.announcement-row small {
+  font-size: 10px;
+}
+
+.attendance-stats span,
+.info-grid span {
+  font-size: 10px;
+}
+
+.attendance-stats strong {
+  font-size: 25px;
+}
+
+.attendance-stats small,
+.info-grid strong {
+  font-size: 10px;
+}
+
+.panel-wide-link {
+  border-color: #b6d0ee;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+@media (max-width: 900px) {
+  .portal-topbar {
+    padding: 0 16px;
+  }
+
+  .portal-content {
+    padding: 18px 16px 28px;
+  }
+}
