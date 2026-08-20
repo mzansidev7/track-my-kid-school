@@ -1,5 +1,9 @@
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/$/, "");
-
+const API_URL = (
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV
+    ? "http://localhost:3000"
+    : "https://track-my-kid-server-1.onrender.com")
+).replace(/\/$/, "");
 export const apiRequest = async (path, options = {}) => {
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
