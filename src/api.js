@@ -5,6 +5,7 @@ const API_URL = (
     : "https://track-my-kid-server-1.onrender.com")
 ).replace(/\/$/, "");
 export const apiRequest = async (path, options = {}) => {
+  console.log({API_URL})
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
