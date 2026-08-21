@@ -26,6 +26,8 @@ const trips = [
   ["Route 4 - Morning", "07:15 AM - 08:30 AM", "31 Students", "1h 15m"],
 ];
 
+console.log({apiRequest})
+
 function MetricCard({
   icon,
   label,
