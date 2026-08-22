@@ -57,14 +57,26 @@ export default function Login() {
             Email address
             <span className="input-wrap">
               <FiMail />
-              <input type="email" value={form.email} onChange={update("email")} required placeholder="school@example.com" />
+              <input
+                type="email"
+                value={form.email}
+                onChange={update("email")}
+                required
+                placeholder="school@example.com"
+              />
             </span>
           </label>
           <label>
             Password
             <span className="input-wrap">
               <FiLock />
-              <input type="password" value={form.password} onChange={update("password")} required placeholder="Enter your password" />
+              <input
+                type="password"
+                value={form.password}
+                onChange={update("password")}
+                required
+                placeholder="Enter your password"
+              />
             </span>
           </label>
           {error && <div className="form-error">{error}</div>}

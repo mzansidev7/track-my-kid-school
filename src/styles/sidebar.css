@@ -5,12 +5,12 @@
   bottom: 0;
   left: 0;
   display: flex;
-  width: 184px;
+  width: var(--portal-sidebar-width);
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid #173b72;
-  background: linear-gradient(180deg, #102f67 0%, #0a214c 100%);
-  color: #dbeafe;
+  border-right: 1px solid #17166d;
+  background: #11115b;
+  color: #f4f1ff;
 }
 
 .sidebar-brand {
@@ -19,7 +19,7 @@
   gap: 10px;
   min-height: 64px;
   padding: 0 18px;
-  border-bottom: 1px solid rgba(191, 219, 254, 0.14);
+  border-bottom: 1px solid rgba(224, 218, 255, 0.18);
 }
 
 .sidebar-brand-logo {
@@ -39,20 +39,20 @@
 }
 
 .sidebar-brand strong {
-  color: #f8fafc;
+  color: #ffffff;
   font-size: 14px;
   line-height: 1.1;
 }
 
 .sidebar-brand span {
   margin-top: 3px;
-  color: #b8c9e2;
+  color: #d3ccf4;
   font-size: 10px;
 }
 
 .sidebar-section-label {
   padding: 0 12px 7px;
-  color: #7fa2d2;
+  color: #aaa2dd;
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 1.4px;
@@ -60,9 +60,84 @@
 }
 
 .portal-nav {
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
   gap: 3px;
   padding: 22px 9px;
+  scrollbar-width: none;
+}
+
+.portal-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-tracking-card {
+  display: block;
+  margin: 0 10px 12px;
+  padding: 10px;
+  border-radius: 12px;
+  background: linear-gradient(155deg, #7141df 0%, #5225bf 100%);
+  color: #ffffff;
+  text-decoration: none;
+  box-shadow: 0 8px 18px rgba(4, 3, 55, 0.2);
+}
+
+.tracking-art {
+  position: relative;
+  display: flex;
+  height: 64px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: -2px 0 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tracking-phone {
+  display: grid;
+  width: 32px;
+  height: 48px;
+  place-items: center;
+  border: 2px solid #21106f;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #31a86b;
+  font-size: 18px;
+}
+
+.tracking-bus {
+  color: #ffbd24;
+  font-size: 34px;
+}
+
+.sidebar-tracking-card > strong,
+.sidebar-tracking-card > span {
+  display: block;
+}
+
+.sidebar-tracking-card > strong {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.sidebar-tracking-card > span {
+  min-height: 27px;
+  color: #e6ddff;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.sidebar-tracking-card > b {
+  display: block;
+  margin-top: 8px;
+  padding: 7px 4px;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #5c31ca;
+  font-size: 9px;
+  text-align: center;
 }
 
 .portal-nav-link {
@@ -73,25 +148,29 @@
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 8px;
-  color: #c5d2e5;
+  color: #e2ddff;
   font-size: 11px;
   font-weight: 600;
   text-decoration: none;
-  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
 }
 
 .portal-nav-link:hover {
-  border-color: rgba(147, 197, 253, 0.18);
-  background: rgba(59, 130, 246, 0.16);
-  color: #fff;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(103, 65, 220, 0.55);
+  color: #ffffff;
   transform: translateX(2px);
 }
 
 .portal-nav-link.active {
-  border-color: rgba(134, 239, 172, 0.35);
-  background: linear-gradient(90deg, #dcfce7 0%, #bbf7d0 100%);
-  color: #126b3d;
-  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.12);
+  border-color: #7548e8;
+  background: linear-gradient(90deg, #6940dc 0%, #5930c8 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 14px rgba(4, 3, 55, 0.24);
 }
 
 .portal-nav-icon {
@@ -119,9 +198,9 @@
   gap: 8px;
   margin: auto 10px 10px;
   padding: 10px 9px;
-  border: 1px solid rgba(147, 197, 253, 0.24);
+  border: 1px solid rgba(224, 218, 255, 0.14);
   border-radius: 10px;
-  background: rgba(15, 53, 111, 0.72);
+  background: #25236f;
 }
 
 .sidebar-user img {
@@ -132,18 +211,18 @@
 }
 
 .sidebar-user strong {
-  color: #f8fafc;
+  color: #ffffff;
   font-size: 10px;
 }
 
 .sidebar-user span {
-  color: #b8c9e2;
+  color: #d3ccf4;
   font-size: 9px;
 }
 
 .sidebar-user > b {
   margin-left: auto;
-  color: #b8c9e2;
+  color: #d3ccf4;
   font-size: 15px;
 }
 
@@ -161,6 +240,7 @@
   .sidebar-section-label,
   .portal-nav-link > span:not(.portal-nav-icon),
   .portal-nav-badge,
+  .sidebar-tracking-card,
   .sidebar-user > div,
   .sidebar-user > b {
     display: none;

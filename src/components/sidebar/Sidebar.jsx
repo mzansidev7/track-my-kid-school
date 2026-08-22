@@ -5,6 +5,7 @@ import {
   FiFileText,
   FiHome,
   FiMap,
+  FiMapPin,
   FiMessageSquare,
   FiNavigation,
   FiSettings,
@@ -54,14 +55,53 @@ function readSession() {
 function readCachedAdmin(session) {
   try {
     const cacheKey = `schoolProfileCache:${session.user?.id || "current"}`;
-    return JSON.parse(localStorage.getItem(cacheKey) || "null")?.data?.admin_profile || session.user?.admin_profile || session.admin_profile || null;
+    return (
+      JSON.parse(localStorage.getItem(cacheKey) || "null")?.data
+        ?.admin_profile ||
+      session.user?.admin_profile ||
+      session.admin_profile ||
+      null
+    );
   } catch {
     return null;
   }
 }
 
+function readCachedSchool(session) {
+  try {
+    const cacheKey = `schoolProfileCache:${session.user?.id || "current"}`;
+    return JSON.parse(localStorage.getItem(cacheKey) || "null")?.data || null;
+  } catch {
+    return null;
+  }
+}
+
+const requiredSchoolFields = [
+  "name",
+  "email",
+  "phone",
+  "address",
+  "province",
+  "emis_number",
+  "principal_name",
+];
+
+function hasCompleteSchoolData(school) {
+  return Boolean(
+    school &&
+    requiredSchoolFields.every((field) => {
+      const value = school[field];
+      return (
+        value !== null && value !== undefined && String(value).trim() !== ""
+      );
+    }),
+  );
+}
+
 export default function Sidebar() {
-  const [admin, setAdmin] = useState(() => readCachedAdmin(readSession()));
+  const session = readSession();
+  const [admin, setAdmin] = useState(() => readCachedAdmin(session));
+  const [school, setSchool] = useState(() => readCachedSchool(session));
 
   useEffect(() => {
     const auth = readSession();
@@ -69,22 +109,36 @@ export default function Sidebar() {
     const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
     try {
       const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
-      if (cached?.timestamp && Date.now() - cached.timestamp < 5 * 60 * 1000) return undefined;
+      if (cached?.timestamp && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+        return undefined;
+      }
     } catch {
       // Fetch a fresh profile when the cache is invalid.
     }
 
     apiRequest("/school/profile", {
       headers: { Authorization: `Bearer ${auth.token || ""}` },
-    }).then((profile) => {
-      setAdmin(profile.admin_profile || null);
-      localStorage.setItem(cacheKey, JSON.stringify({ data: profile, timestamp: Date.now() }));
-    }).catch(() => undefined);
+    })
+      .then((profile) => {
+        setSchool(profile);
+        setAdmin(profile.admin_profile || null);
+        localStorage.setItem(
+          cacheKey,
+          JSON.stringify({ data: profile, timestamp: Date.now() }),
+        );
+      })
+      .catch(() => undefined);
 
     return undefined;
   }, []);
 
-  const adminName = [admin?.first_name, admin?.last_name].filter(Boolean).join(" ") || "School Admin";
+  const adminName =
+    [admin?.first_name, admin?.last_name].filter(Boolean).join(" ") ||
+    "School Admin";
+  const schoolDataComplete = hasCompleteSchoolData(school);
+  const visibleMenuItems = schoolDataComplete
+    ? menuItems
+    : menuItems.filter(({ path }) => path === "/settings");
 
   return (
     <aside className="portal-sidebar">
@@ -97,27 +151,35 @@ export default function Sidebar() {
       </div>
       <nav className="portal-nav" aria-label="Main navigation">
         <span className="sidebar-section-label">Workspace</span>
-        {menuItems.map(
-          ({
-            title,
-            icon,
-            path,
-            badge,
-          }) => (
-            <NavLink
-              key={path}
-              to={path}
-              className={({ isActive }) =>
-                `portal-nav-link${isActive ? " active" : ""}`
-              }
-            >
-              <span className="portal-nav-icon">{icon}</span>
-              <span>{title}</span>
-              {badge && <b className="portal-nav-badge">{badge}</b>}
-            </NavLink>
-          ),
-        )}
+        {visibleMenuItems.map(({ title, icon, path, badge }) => (
+          <NavLink
+            key={path}
+            to={path}
+            className={({ isActive }) =>
+              `portal-nav-link${isActive ? " active" : ""}`
+            }
+          >
+            <span className="portal-nav-icon">{icon}</span>
+            <span>{title}</span>
+            {badge && <b className="portal-nav-badge">{badge}</b>}
+          </NavLink>
+        ))}
       </nav>
+      {schoolDataComplete && (
+        <>
+          <span className="sidebar-section-label">Live Tracking</span>
+          <NavLink className="sidebar-tracking-card" to="/tracking">
+            <div className="tracking-art" aria-hidden="true">
+              <span className="tracking-phone">
+                <FiMapPin />
+              </span>
+              <FaBus className="tracking-bus" />
+            </div>
+            <strong>Live Tracking</strong>
+            <span>Monitor all school vehicles in real-time</span>
+          </NavLink>
+        </>
+      )}
       <div className="sidebar-user">
         <img src="https://i.pravatar.cc/100?img=5" alt="Admin profile" />
         <div>

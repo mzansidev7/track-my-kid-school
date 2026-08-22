@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { FiArrowRight, FiBriefcase, FiCheck, FiLock, FiMail, FiUser } from "react-icons/fi";
+import {
+  FiArrowRight,
+  FiBriefcase,
+  FiCheck,
+  FiLock,
+  FiMail,
+  FiUser,
+} from "react-icons/fi";
 import { apiRequest } from "../api";
 import SchoolLocationPicker from "../components/SchoolLocationPicker";
 import SchoolSearchInput from "../components/SchoolSearchInput";
@@ -98,7 +105,11 @@ export default function Register() {
   );
 
   const chooseSchool = (school) => {
-    if (school.is_active || school.latitude === null || school.longitude === null) {
+    if (
+      school.is_active ||
+      school.latitude === null ||
+      school.longitude === null
+    ) {
       return;
     }
     setSelectedSchool(school);
@@ -145,11 +156,20 @@ export default function Register() {
         <img className="auth-brand-logo" src={logo} alt="Track My Kid" />
         <p className="eyebrow">SCHOOL REGISTRATION</p>
         <h1>Your school, ready for the day ahead.</h1>
-        <p className="intro-copy">Complete your registration to start managing your school community in Track My Kid.</p>
+        <p className="intro-copy">
+          Complete your registration to start managing your school community in
+          Track My Kid.
+        </p>
         <ul className="benefit-list">
-          <li><FiCheck /> Connect your school profile</li>
-          <li><FiCheck /> Keep learner information organised</li>
-          <li><FiCheck /> Coordinate with families and transport teams</li>
+          <li>
+            <FiCheck /> Connect your school profile
+          </li>
+          <li>
+            <FiCheck /> Keep learner information organised
+          </li>
+          <li>
+            <FiCheck /> Coordinate with families and transport teams
+          </li>
         </ul>
       </section>
       <section className="auth-panel registration-panel">
@@ -173,21 +193,70 @@ export default function Register() {
               onPlaceSelected={chooseGooglePlace}
             />
           </label>
-          {!selectedSchool && form.name.trim() && matchingSchools.length > 0 && (
-            <div className="school-results">
-              {matchingSchools.slice(0, 6).map((school) => (
-                <button type="button" key={school.id} disabled={school.is_active || school.latitude === null || school.longitude === null} onClick={() => chooseSchool(school)}>
-                  <strong>{school.name}</strong>
-                  <span>{school.address || "Address not set"} · {school.is_active ? "Already registered" : school.latitude === null || school.longitude === null ? "No map location" : "Select school"}</span>
-                </button>
-              ))}
-            </div>
+          {!selectedSchool &&
+            form.name.trim() &&
+            matchingSchools.length > 0 && (
+              <div className="school-results">
+                {matchingSchools.slice(0, 6).map((school) => (
+                  <button
+                    type="button"
+                    key={school.id}
+                    disabled={
+                      school.is_active ||
+                      school.latitude === null ||
+                      school.longitude === null
+                    }
+                    onClick={() => chooseSchool(school)}
+                  >
+                    <strong>{school.name}</strong>
+                    <span>
+                      {school.address || "Address not set"} ·{" "}
+                      {school.is_active
+                        ? "Already registered"
+                        : school.latitude === null || school.longitude === null
+                          ? "No map location"
+                          : "Select school"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          {selectedSchool && (
+            <button
+              type="button"
+              className="change-school"
+              onClick={clearSchoolSelection}
+            >
+              Change school
+            </button>
           )}
-          {selectedSchool && <button type="button" className="change-school" onClick={clearSchoolSelection}>Change school</button>}
           <div className="form-grid">
-            <label>Principal or contact person<span className="input-wrap"><FiUser /><input value={form.principal_name} onChange={update("principal_name")} required placeholder="Full name" /></span></label>
+            <label>
+              Principal or contact person
+              <span className="input-wrap">
+                <FiUser />
+                <input
+                  value={form.principal_name}
+                  onChange={update("principal_name")}
+                  required
+                  placeholder="Full name"
+                />
+              </span>
+            </label>
           </div>
-          <label>Email address<span className="input-wrap"><FiMail /><input type="email" value={form.email} onChange={update("email")} required placeholder="school@example.com" /></span></label>
+          <label>
+            Email address
+            <span className="input-wrap">
+              <FiMail />
+              <input
+                type="email"
+                value={form.email}
+                onChange={update("email")}
+                required
+                placeholder="school@example.com"
+              />
+            </span>
+          </label>
           <SchoolLocationPicker
             value={{
               address: form.address,
@@ -205,16 +274,56 @@ export default function Register() {
             locked={locationLocked}
             onLocationSelected={() => setLocationLocked(true)}
           />
-          <label>EMIS number <span className="optional">Optional</span><span className="input-wrap"><FiBriefcase /><input value={form.emis_number} onChange={update("emis_number")} placeholder="School registration number" /></span></label>
+          <label>
+            EMIS number <span className="optional">Optional</span>
+            <span className="input-wrap">
+              <FiBriefcase />
+              <input
+                value={form.emis_number}
+                onChange={update("emis_number")}
+                placeholder="School registration number"
+              />
+            </span>
+          </label>
           <div className="form-grid">
-            <label>Password<span className="input-wrap"><FiLock /><input type="password" value={form.password} onChange={update("password")} required minLength={6} placeholder="At least 6 characters" /></span></label>
-            <label>Confirm password<span className="input-wrap"><FiLock /><input type="password" value={form.confirmPassword} onChange={update("confirmPassword")} required placeholder="Repeat password" /></span></label>
+            <label>
+              Password
+              <span className="input-wrap">
+                <FiLock />
+                <input
+                  type="password"
+                  value={form.password}
+                  onChange={update("password")}
+                  required
+                  minLength={6}
+                  placeholder="At least 6 characters"
+                />
+              </span>
+            </label>
+            <label>
+              Confirm password
+              <span className="input-wrap">
+                <FiLock />
+                <input
+                  type="password"
+                  value={form.confirmPassword}
+                  onChange={update("confirmPassword")}
+                  required
+                  placeholder="Repeat password"
+                />
+              </span>
+            </label>
           </div>
           {error && <div className="form-error">{error}</div>}
           {success && <div className="form-success">{success}</div>}
-          <button className="primary-button" disabled={loading}>{loading ? "Creating account..." : "Complete registration"} <FiArrowRight /></button>
+          <button className="primary-button" disabled={loading}>
+            {loading ? "Creating account..." : "Complete registration"}{" "}
+            <FiArrowRight />
+          </button>
         </form>
-        <p className="auth-switch">Already registered? <Link to="/login">Sign in</Link></p>
+        <p className="auth-switch">
+          Already registered? <Link to="/login">Sign in</Link>
+        </p>
       </section>
     </main>
   );

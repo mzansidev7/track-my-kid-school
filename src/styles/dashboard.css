@@ -1,5 +1,5 @@
 .portal-main {
-  background: #071a3d;
+  background: "white";
 }
 
 .portal-topbar {
@@ -15,9 +15,8 @@
   font-size: 12px;
 }
 
-.portal-search{
+.portal-search {
   background: "white" !important;
-
 }
 
 .top-profile strong {

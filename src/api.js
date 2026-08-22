@@ -6,10 +6,11 @@ const API_URL = (
 ).replace(/\/$/, "");
 export const apiRequest = async (path, options = {}) => {
   console.log({API_URL})
+  const isMultipart = options.body instanceof FormData;
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(isMultipart ? {} : { "Content-Type": "application/json" }),
       ...(options.headers || {}),
     },
   });
