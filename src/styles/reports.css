@@ -33,9 +33,15 @@
   cursor: pointer;
 }
 .report-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   border: 1px solid #dce4eb;
+  border-radius: 6px;
+  padding: 8px 13px;
   background: #fff;
   color: #334155;
+  font-size: 10px;
 }
 .report-date b {
   margin-left: 10px;
@@ -46,6 +52,51 @@
   background: #6132d7;
   color: #fff;
   font-weight: 750;
+}
+.report-secondary {
+  border: 1px solid #dce4eb;
+  background: #fff;
+  color: #475569;
+}
+.report-secondary:disabled,
+.report-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+.report-refreshing {
+  animation: report-spin 0.8s linear infinite;
+}
+@keyframes report-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.reports-error,
+.reports-loading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 7px;
+  padding: 10px 12px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+}
+.reports-error button {
+  border: 0;
+  background: transparent;
+  color: #7c2d12;
+  font-weight: 700;
+  cursor: pointer;
+}
+.reports-loading {
+  justify-content: center;
+  border-color: #dbeafe;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 .report-metrics {
   display: grid;
@@ -223,6 +274,72 @@
     #eef2f6 36px
   );
 }
+.report-trend-bars {
+  display: flex;
+  height: 165px;
+  align-items: flex-end;
+  justify-content: space-around;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 0 8px;
+  border-bottom: 1px solid #dce4eb;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 35px,
+    #eef2f6 36px
+  );
+}
+.report-trend-day {
+  display: flex;
+  height: 100%;
+  min-width: 24px;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.report-trend-day strong,
+.report-trend-day small {
+  color: #64748b;
+  font-size: 9px;
+}
+.report-trend-track {
+  display: flex;
+  width: min(28px, 70%);
+  height: 112px;
+  align-items: flex-end;
+  overflow: hidden;
+  border-radius: 5px 5px 0 0;
+  background: #f0e9ff;
+}
+.report-trend-track i {
+  display: block;
+  width: 100%;
+  min-height: 3px;
+  border-radius: 5px 5px 0 0;
+  background: #6934df;
+}
+.report-no-data {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  color: #64748b;
+  font-size: 11px;
+  text-align: center;
+}
+.report-empty-row {
+  padding: 24px !important;
+  color: #64748b !important;
+  text-align: center;
+}
+.report-data-updated {
+  margin-top: 14px;
+  color: #64748b;
+  font-size: 9px;
+  line-height: 1.5;
+}
 .chart-area:after {
   content: "";
   position: absolute;
@@ -346,10 +463,9 @@
   place-items: center;
   border-radius: 50%;
   background: conic-gradient(
-    #20a660 0 68.8%,
-    #2879de 68.8% 90.7%,
-    #f39a21 90.7% 97%,
-    #e7475e 97%
+    #20a660 0 var(--online-share, 0%),
+    #2879de var(--online-share, 0%) var(--assigned-end, 0%),
+    #f39a21 var(--assigned-end, 0%) 100%
   );
 }
 .donut:after {

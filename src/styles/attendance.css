@@ -1,14 +1,30 @@
+.portal-main:has(.attendance-content) {
+  display: flex;
+  height: 100svh;
+  min-height: 0;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+}
 .attendance-content {
-  min-height: calc(100svh - 48px);
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 14px 22px;
   background: #fff;
   color: #334155;
 }
 .attendance-heading {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 20px;
+  margin-bottom: 13px;
 }
 .attendance-heading h1 {
   margin: 0 0 5px;
@@ -33,6 +49,62 @@
   font-weight: 750;
   cursor: pointer;
 }
+.attendance-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -8px 0 14px;
+  border: 1px solid #bbf7d0;
+  border-radius: 7px;
+  padding: 9px 12px;
+  background: #f0fdf4;
+  color: #15803d;
+  font-size: 11px;
+  font-weight: 700;
+}
+.attendance-reminder {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: -7px 0 15px;
+  border: 1px solid #f6d58a;
+  border-radius: 8px;
+  padding: 11px 13px;
+  background: #fffbeb;
+  color: #92400e;
+}
+.attendance-reminder > svg {
+  flex: 0 0 auto;
+  font-size: 18px;
+  color: #d97706;
+}
+.attendance-reminder > div {
+  min-width: 0;
+  flex: 1;
+}
+.attendance-reminder strong {
+  display: block;
+  font-size: 11px;
+}
+.attendance-reminder p {
+  margin: 2px 0 0;
+  color: #a16207;
+  font-size: 10px;
+}
+.attendance-reminder button {
+  flex: 0 0 auto;
+  border: 1px solid #eab64e;
+  border-radius: 5px;
+  padding: 7px 10px;
+  background: #fff;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.attendance-reminder button:hover {
+  background: #fef3c7;
+}
 .attendance-secondary {
   border: 1px solid #dce4eb;
   background: #fff;
@@ -45,16 +117,17 @@
 }
 .attendance-summary {
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: repeat(4, 1fr);
-  gap: 13px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 .attendance-summary article {
   display: flex;
   align-items: center;
   gap: 11px;
-  min-height: 78px;
-  padding: 13px 14px;
+  min-height: 66px;
+  padding: 10px 12px;
   border: 1px solid #e5eaf0;
   border-radius: 8px;
   background: #fff;
@@ -117,15 +190,22 @@
 }
 .attendance-layout {
   display: grid;
+  min-height: 0;
+  flex: 1;
   grid-template-columns: minmax(0, 1fr) 260px;
   gap: 13px;
 }
 .attendance-register,
 .attendance-side {
+  min-height: 0;
   overflow: hidden;
   border: 1px solid #e5eaf0;
   border-radius: 8px;
   background: #fff;
+}
+.attendance-register {
+  display: flex;
+  flex-direction: column;
 }
 .attendance-register-head {
   display: flex;
@@ -142,24 +222,6 @@
 .attendance-register-head > div:first-child > span {
   color: #94a3b8;
   font-size: 10px;
-}
-.attendance-tabs {
-  display: flex;
-  gap: 17px;
-}
-.attendance-tabs button {
-  padding: 11px 1px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: #64748b;
-  font-size: 10px;
-  cursor: pointer;
-}
-.attendance-tabs button.active {
-  border-color: #6934df;
-  color: #6030d2;
-  font-weight: 750;
 }
 .attendance-toolbar {
   display: flex;
@@ -195,13 +257,31 @@
   padding: 7px 10px;
   font-size: 10px;
 }
+.attendance-date-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dce4eb;
+  border-radius: 5px;
+  padding: 7px 10px;
+  background: #fff;
+  color: #475569;
+}
+.attendance-date-filter input {
+  border: 0;
+  outline: 0;
+  color: #475569;
+  font-size: 10px;
+}
 .attendance-toolbar button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 .attendance-table-wrap {
-  overflow-x: auto;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
 }
 .attendance-table-wrap table {
   width: 100%;
@@ -319,46 +399,85 @@
 }
 .attendance-footer {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   padding: 10px 13px;
   color: #64748b;
   font-size: 10px;
 }
-.attendance-footer button {
-  width: 25px;
-  height: 25px;
-  margin-left: 4px;
+.attendance-pagination {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.attendance-pagination button {
+  min-width: 27px;
+  height: 27px;
+  padding: 0 7px;
   border: 1px solid #e1e8ef;
-  border-radius: 4px;
+  border-radius: 6px;
   background: #fff;
   color: #64748b;
+  font-size: 10px;
+  font-weight: 650;
   cursor: pointer;
 }
-.attendance-footer button.current-page {
+.attendance-pagination button.pagination-direction {
+  padding: 0 8px;
+}
+.attendance-pagination button.current-page {
   border-color: #6934df;
   background: #6934df;
   color: #fff;
 }
-.attendance-footer button:disabled {
+.attendance-pagination button:disabled {
   color: #cbd5e1;
   cursor: default;
 }
+.pagination-ellipsis {
+  padding: 0 2px;
+  color: #94a3b8;
+  font-size: 11px;
+}
 .attendance-side-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   padding: 14px 13px 7px;
 }
 .attendance-side-head h2 {
+  flex: 1 1 100%;
   margin: 0;
   color: #17204d;
   font-size: 15px;
 }
-.attendance-side-head button {
+.attendance-overview-tabs {
+  display: flex;
+  width: 100%;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 3px;
+  border-radius: 6px;
+  background: #f1f5f9;
+}
+.attendance-overview-tabs button {
+  flex: 1;
   border: 0;
+  border-radius: 4px;
+  padding: 6px 3px;
   background: transparent;
   color: #64748b;
+  font-size: 9px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.attendance-overview-tabs button.active {
+  background: #fff;
+  color: #6030d2;
+  box-shadow: 0 1px 3px #17204d1a;
 }
 .weekly-chart {
   display: flex;
@@ -370,7 +489,9 @@
 }
 .weekly-chart > div {
   display: flex;
+  min-width: 0;
   height: 100%;
+  flex: 1;
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
@@ -462,42 +583,194 @@
 }
 @media (max-width: 1050px) {
   .attendance-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) 235px;
   }
-  .attendance-side {
-    display: none;
+}
+@media (max-height: 760px) and (min-width: 701px) {
+  .attendance-content {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .attendance-heading {
+    margin-bottom: 8px;
+  }
+  .attendance-heading h1 {
+    font-size: 23px;
+  }
+  .attendance-heading p:last-child {
+    margin: 2px 0 0;
+    font-size: 10px;
+  }
+  .attendance-summary {
+    gap: 7px;
+    margin-bottom: 8px;
+  }
+  .attendance-summary article {
+    min-height: 56px;
+    padding: 7px 9px;
+  }
+  .attendance-summary strong {
+    font-size: 20px;
+  }
+  .attendance-summary em {
+    font-size: 8px;
   }
 }
 @media (max-width: 700px) {
-  .attendance-heading {
+  .attendance-content {
+    padding: 10px 10px 8px;
+  }
+  .attendance-reminder {
     align-items: flex-start;
-    flex-direction: column;
+    flex-wrap: wrap;
+  }
+  .attendance-reminder button {
+    margin-left: 29px;
+  }
+  .attendance-heading {
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .attendance-heading h1 {
+    font-size: 21px;
+  }
+  .attendance-heading p:last-child {
+    display: none;
   }
   .attendance-actions {
-    width: 100%;
+    flex-direction: column;
+    gap: 5px;
   }
   .attendance-actions button {
-    flex: 1;
+    justify-content: center;
+    padding: 7px 8px;
+    font-size: 9px;
   }
   .attendance-summary {
     grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .attendance-summary article {
+    min-height: 52px;
+    gap: 7px;
+    padding: 6px 8px;
+  }
+  .attendance-icon {
+    width: 27px;
+    height: 27px;
+  }
+  .attendance-summary small {
+    font-size: 9px;
+  }
+  .attendance-summary strong {
+    font-size: 18px;
+  }
+  .attendance-summary em {
+    font-size: 7px;
+  }
+  .attendance-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 145px minmax(0, 1fr);
+    grid-template-areas:
+      "overview"
+      "register";
+    gap: 7px;
+  }
+  .attendance-register {
+    grid-area: register;
+  }
+  .attendance-side {
+    grid-area: overview;
+  }
+  .attendance-side-head {
+    padding: 8px 10px 3px;
+  }
+  .attendance-side-head h2 {
+    font-size: 12px;
+  }
+  .attendance-overview-tabs {
+    margin-top: 5px;
+    padding: 2px;
+  }
+  .attendance-overview-tabs button {
+    padding: 4px 2px;
+    font-size: 8px;
+  }
+  .weekly-chart {
+    height: 55px;
+    padding: 4px 10px 6px;
+  }
+  .weekly-chart span,
+  .weekly-chart b {
+    font-size: 7px;
+  }
+  .weekly-chart i {
+    width: 12px;
+    min-height: 10px;
+  }
+  .attendance-side-note,
+  .attendance-breakdown {
+    display: none;
   }
   .attendance-register-head {
-    align-items: flex-start;
-    flex-direction: column;
+    min-height: 36px;
+    align-items: center;
+    padding: 7px 10px 0;
   }
-  .attendance-tabs {
-    width: 100%;
+  .attendance-register-head h2 {
+    font-size: 12px;
   }
   .attendance-toolbar {
-    flex-wrap: wrap;
+    gap: 5px;
+    padding: 6px 8px;
   }
   .attendance-search {
-    min-width: 100%;
+    min-width: 80px;
+    padding: 5px 6px;
+  }
+  .attendance-toolbar select,
+  .attendance-date-filter,
+  .attendance-date-filter input {
+    padding: 5px 6px;
+    font-size: 8px;
+  }
+  .attendance-table-wrap table {
+    min-width: 650px;
+  }
+  .attendance-table-wrap td {
+    padding: 5px 8px;
   }
   .attendance-footer {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 8px;
+    padding: 5px 7px;
+    font-size: 8px;
+  }
+  .attendance-pagination {
+    gap: 2px;
+  }
+  .attendance-pagination button {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 4px;
+    font-size: 8px;
+  }
+  .attendance-pagination button.pagination-direction {
+    padding: 0 5px;
+  }
+}
+@media (max-width: 380px) {
+  .attendance-pagination button.pagination-direction {
+    font-size: 0;
+  }
+  .attendance-pagination
+    button.pagination-direction[aria-label="Previous page"]::after {
+    content: "‹";
+    font-size: 13px;
+  }
+  .attendance-pagination
+    button.pagination-direction[aria-label="Next page"]::after {
+    content: "›";
+    font-size: 13px;
   }
 }

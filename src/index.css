@@ -78,11 +78,11 @@ body {
 }
 .portal-main {
   min-width: 0;
-  min-height: 100svh;
+  box-sizing: border-box;
+  height: 100vh;
   margin-left: var(--portal-sidebar-width);
   padding-top: 48px;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: visible;
   background: #f7f8fc;
 }
 .portal-topbar {
@@ -97,7 +97,7 @@ body {
   align-items: center;
   justify-content: space-between;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
   padding: 0 28px;
   border-bottom: 1px solid #e8edf2;
   background: #fff;
@@ -125,7 +125,7 @@ body {
   min-width: 0;
   align-items: center;
   gap: 18px;
-  overflow: hidden;
+  overflow: visible;
 }
 .portal-search {
   display: flex;
@@ -171,6 +171,8 @@ body {
   font-size: 8px;
 }
 .top-profile {
+  position: relative;
+  z-index: 21;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -774,14 +776,14 @@ body {
   display: block;
 }
 .register-shell .registration-panel {
-  width: min(100% - 56px, 520px);
+  width: 100%;
   height: 100%;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
   box-sizing: border-box;
-  padding: 42px 0;
+  padding: 42px max(28px, calc((100% - 520px) / 2));
 }
 .register-shell .registration-panel::-webkit-scrollbar {
   display: none;
@@ -839,6 +841,26 @@ body {
   color: #0f172a;
   font: inherit;
   font-size: 14px;
+}
+.password-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 0;
+  padding: 4px;
+  color: #64748b;
+  background: transparent;
+  cursor: pointer;
+}
+.password-toggle:hover,
+.password-toggle:focus-visible {
+  color: #0f766e;
+}
+.password-toggle:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .school-search-input {
   position: relative;
@@ -906,6 +928,20 @@ body {
 .form-success {
   background: #ecfdf5;
   color: #047857;
+}
+.auth-secondary-button {
+  border: 1px solid #d8e1df;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f766e;
+  padding: 13px 20px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.auth-secondary-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 .form-grid {
   display: grid;

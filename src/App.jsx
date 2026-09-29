@@ -19,17 +19,34 @@ import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Members from "./pages/Members";
+import Messages from "./pages/Messages";
 import PortalLayout from "./components/PortalLayout";
 import { apiRequest } from "./api";
+import { canAccessPath } from "./accessControl";
 
 const requiredSchoolFields = [
   "name",
-  "email",
+  "emis_number",
+  "school_email",
   "phone",
+  "principal_name",
   "address",
   "province",
-  "emis_number",
-  "principal_name",
+  "district",
+  "logo",
+  "latitude",
+  "longitude",
+  "start_time",
+  "end_time",
+];
+
+const requiredAdminFields = [
+  "first_name",
+  "last_name",
+  "email",
+  "phone",
+  "job_title",
+  "role",
 ];
 
 function hasCompleteSchoolData(school) {
@@ -42,6 +59,22 @@ function hasCompleteSchoolData(school) {
       );
     }),
   );
+}
+
+function hasCompleteAdminData(school, auth) {
+  const admin =
+    school?.admin_profile || auth?.user?.admin_profile || auth?.admin_profile;
+  if (!admin) return false;
+
+  return requiredAdminFields.every((field) => {
+    const value =
+      field === "email"
+        ? admin.email || auth?.user?.email
+        : field === "phone"
+          ? admin.phone || auth?.user?.phone
+          : admin[field];
+    return value !== null && value !== undefined && String(value).trim() !== "";
+  });
 }
 
 function readCachedSchool(auth) {
@@ -80,6 +113,35 @@ function ProtectedRoute({ children }) {
   const [profileLoading, setProfileLoading] = useState(!initialProfile.isFresh);
 
   useEffect(() => {
+    const handleProfileUpdate = (event) => {
+      const updated = event.detail;
+      if (!updated) return;
+
+      setSchool((current) => {
+        if (updated.admin_profile && !updated.id) {
+          return {
+            ...(current || {}),
+            admin_profile: {
+              ...(current?.admin_profile || {}),
+              ...updated.admin_profile,
+            },
+          };
+        }
+
+        return {
+          ...(current || {}),
+          ...updated,
+          admin_profile: updated.admin_profile || current?.admin_profile,
+        };
+      });
+    };
+
+    window.addEventListener("school-profile-updated", handleProfileUpdate);
+    return () =>
+      window.removeEventListener("school-profile-updated", handleProfileUpdate);
+  }, []);
+
+  useEffect(() => {
     if (!isSchoolSession || initialProfile.isFresh) return undefined;
 
     const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
@@ -103,9 +165,35 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-  if (profileLoading) return null;
+  if (profileLoading) {
+    return (
+      <main
+        role="status"
+        aria-live="polite"
+        style={{
+          alignItems: "center",
+          display: "flex",
+          justifyContent: "center",
+          minHeight: "100vh",
+        }}
+      >
+        Loading your school profile…
+      </main>
+    );
+  }
 
-  if (location.pathname !== "/settings" && !hasCompleteSchoolData(school)) {
+  const accessLevel =
+    school?.admin_profile?.access_level ||
+    auth?.user?.admin_profile?.access_level ||
+    auth?.admin_profile?.access_level;
+  if (!canAccessPath(accessLevel, location.pathname)) {
+    return <Navigate to="/settings" replace />;
+  }
+
+  if (
+    location.pathname !== "/settings" &&
+    (!hasCompleteSchoolData(school) || !hasCompleteAdminData(school, auth))
+  ) {
     return <Navigate to="/settings" replace />;
   }
 
@@ -196,6 +284,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Announcements />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/messages"
+        element={
+          <ProtectedRoute>
+            <Messages />
           </ProtectedRoute>
         }
       />

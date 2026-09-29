@@ -1,95 +1,25 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiAlertCircle,
   FiBell,
   FiCalendar,
   FiCheckCircle,
   FiClock,
-  FiMap,
   FiMapPin,
   FiMail,
-  FiPhone,
   FiSearch,
-  FiSettings,
-  FiShare2,
   FiTruck,
-  FiArrowUp,
   FiUser,
   FiUsers,
+  FiShare2,
 } from "react-icons/fi";
+import { apiRequest } from "../api";
+import { supabaseClient } from "../supabaseClient";
 import "../styles/notifications.css";
 
-const notifications = [
-  {
-    title: "Trip Started - Route 1",
-    text: "The morning trip for Route 1 has started. Driver John Mokoena has departed from Stop 1.",
-    time: "2 min ago",
-    tag: "Trips",
-    tone: "purple",
-    icon: FiTruck,
-    unread: true,
-  },
-  {
-    title: "Important: Safety Reminder",
-    text: "Please ensure all students wear seatbelts while travelling.",
-    time: "15 min ago",
-    tag: "Important",
-    tone: "orange",
-    icon: FiAlertCircle,
-    unread: true,
-  },
-  {
-    title: "New Student Added",
-    text: "Lethabo Dlamini has been added to Grade 4B.",
-    time: "1 hour ago",
-    tag: "Students",
-    tone: "green",
-    icon: FiUser,
-  },
-  {
-    title: "Parent-Teacher Meeting",
-    text: "A meeting has been scheduled for Friday, 23 May 2026.",
-    time: "2 hours ago",
-    tag: "General",
-    tone: "blue",
-    icon: FiCalendar,
-  },
-  {
-    title: "Vehicle Maintenance Due",
-    text: "Toyota Quantum (GP 45 CD GP) is due for maintenance.",
-    time: "3 hours ago",
-    tag: "Vehicles",
-    tone: "green",
-    icon: FiTruck,
-  },
-  {
-    title: "Route Update",
-    text: "Route 3 stop times have been updated.",
-    time: "Yesterday, 18:20",
-    tag: "Routes",
-    tone: "purple",
-    icon: FiMapPin,
-  },
-  {
-    title: "Incident Reported",
-    text: "Minor incident reported on Route 2 at Stop 4.",
-    time: "Yesterday, 16:45",
-    tag: "Incidents",
-    tone: "red",
-    icon: FiAlertCircle,
-  },
-  {
-    title: "Announcement Published",
-    text: "New announcement: School will be closed on 28 June 2026.",
-    time: "Yesterday, 14:10",
-    tag: "Announcements",
-    tone: "orange",
-    icon: FiMail,
-  },
-];
 const tabs = [
   "All",
-  "Unread (5)",
+  "Unread",
   "Important",
   "Trips",
   "Students",
@@ -98,10 +28,145 @@ const tabs = [
   "Parents",
 ];
 
+const notificationPresentation = (type) => {
+  if (type === "emergency")
+    return { tag: "Emergency", tone: "red", icon: FiAlertCircle };
+  if (type === "absence_report")
+    return { tag: "Attendance", tone: "orange", icon: FiCalendar };
+  if (
+    [
+      "route_started",
+      "driver_arriving",
+      "child_picked_up",
+      "child_dropped_off",
+    ].includes(type)
+  ) {
+    return { tag: "Trips", tone: "purple", icon: FiTruck };
+  }
+  if (["vehicle_delayed", "delay_warning", "missed_stop"].includes(type)) {
+    return { tag: "Important", tone: "orange", icon: FiAlertCircle };
+  }
+  if (type === "message") return { tag: "Parents", tone: "blue", icon: FiMail };
+  return { tag: "System", tone: "blue", icon: FiBell };
+};
+
+const toViewModel = (notification) => ({
+  ...notification,
+  text: notification.message,
+  unread: notification.is_read !== true,
+  time: notification.created_at
+    ? new Date(notification.created_at).toLocaleString()
+    : "Just now",
+  ...notificationPresentation(notification.type),
+});
+
 function Notifications() {
+  const auth = JSON.parse(localStorage.getItem("schoolAuth") || "{}");
+  const cacheKey = `schoolNotificationsCache:${auth.user?.id || "current"}`;
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("All");
-  const [selected, setSelected] = useState(notifications[0]);
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      return Array.isArray(cached?.data) ? cached.data.map(toViewModel) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selected, setSelected] = useState(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      const first = Array.isArray(cached?.data) ? cached.data[0] : null;
+      return first ? toViewModel(first) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !Array.isArray(
+        JSON.parse(localStorage.getItem(cacheKey) || "null")?.data,
+      );
+    } catch {
+      return true;
+    }
+  });
+  const [error, setError] = useState("");
+  const [markingAll, setMarkingAll] = useState(false);
+  const [now] = useState(() => Date.now());
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
+
+  const loadNotifications = useCallback(async () => {
+    setError("");
+    try {
+      const data = await apiRequest("/school/notifications?limit=100", {
+        headers: {
+          Authorization: `Bearer ${auth.token || ""}`,
+        },
+      });
+      localStorage.setItem(
+        cacheKey,
+        JSON.stringify({ data, timestamp: Date.now() }),
+      );
+      const next = (Array.isArray(data) ? data : []).map(toViewModel);
+      setNotifications(next);
+      setSelected((current) =>
+        current
+          ? next.find((notification) => notification.id === current.id) || null
+          : next[0] || null,
+      );
+    } catch (requestError) {
+      setError(requestError.message || "Unable to load notifications.");
+    } finally {
+      setLoading(false);
+    }
+  }, [auth.token, cacheKey]);
+
+  useEffect(() => {
+    // Load the server-backed notification feed when the page opens.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadNotifications();
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    const userId = auth.user?.id;
+    if (!supabaseClient || !userId) return undefined;
+
+    let active = true;
+    const channel = supabaseClient
+      .channel(`school-notifications:${userId}:${Date.now()}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          if (active) void loadNotifications();
+        },
+      );
+
+    channel.subscribe((status) => {
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.warn("School notifications realtime unavailable:", status);
+      }
+    });
+
+    return () => {
+      active = false;
+      void supabaseClient.removeChannel(channel);
+    };
+  }, [auth.user?.id, loadNotifications]);
+
+  const unreadCount = notifications.filter((item) => item.unread).length;
+  const alertCount = notifications.filter((item) =>
+    ["emergency", "vehicle_delayed", "delay_warning", "missed_stop"].includes(
+      item.type,
+    ),
+  ).length;
   const filtered = useMemo(
     () =>
       notifications.filter(
@@ -110,10 +175,70 @@ function Notifications() {
             .toLowerCase()
             .includes(query.toLowerCase()) &&
           (tab === "All" ||
-            (tab.startsWith("Unread") ? item.unread : item.tag === tab)),
+            (tab === "Unread" ? item.unread : item.tag === tab)),
       ),
-    [query, tab],
+    [notifications, query, tab],
   );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const paginatedNotifications = filtered.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
+  );
+
+  useEffect(() => {
+    // Return to the first page when the active filter changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPage(1);
+  }, [query, tab]);
+
+  const thisWeekCount = notifications.filter(
+    (item) =>
+      item.created_at &&
+      now - new Date(item.created_at).getTime() < 7 * 24 * 60 * 60 * 1000,
+  ).length;
+
+  const markAsRead = async (item) => {
+    if (!item?.unread) return;
+    try {
+      const auth = JSON.parse(localStorage.getItem("schoolAuth") || "{}");
+      await apiRequest(`/school/notifications/${item.id}/read`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${auth.token || ""}` },
+      });
+      setNotifications((current) =>
+        current.map((notification) =>
+          notification.id === item.id
+            ? { ...notification, unread: false, is_read: true }
+            : notification,
+        ),
+      );
+      setSelected((current) =>
+        current?.id === item.id
+          ? { ...current, unread: false, is_read: true }
+          : current,
+      );
+    } catch (requestError) {
+      setError(requestError.message || "Unable to mark notification as read.");
+    }
+  };
+
+  const selectNotification = (item) => {
+    setSelected(item);
+    markAsRead(item);
+  };
+
+  const markAllAsRead = async () => {
+    if (markingAll || !unreadCount) return;
+    setMarkingAll(true);
+    try {
+      await Promise.all(
+        notifications.filter((item) => item.unread).map(markAsRead),
+      );
+    } finally {
+      setMarkingAll(false);
+    }
+  };
   return (
     <>
       {/* <header className="portal-topbar">
@@ -149,11 +274,22 @@ function Notifications() {
             <p>Stay updated with all important activities and alerts.</p>
           </div>
           <div className="notifications-actions">
-            <button className="mark-read">
-              <FiCheckCircle /> Mark all as read
-            </button>
-            <button className="notification-primary">
-              <FiSettings /> Notification settings
+            <button
+              className="mark-read"
+              type="button"
+              onClick={markAllAsRead}
+              disabled={!unreadCount || markingAll}
+            >
+              {markingAll ? (
+                <>
+                  <span className="notification-spinner" aria-hidden="true" />
+                  Marking as read...
+                </>
+              ) : (
+                <>
+                  <FiCheckCircle /> Mark all as read
+                </>
+              )}
             </button>
           </div>
         </section>
@@ -164,10 +300,8 @@ function Notifications() {
             </span>
             <div>
               <small>Total notifications</small>
-              <strong>128</strong>
-              <em>
-                <FiArrowUp /> 18 today
-              </em>
+              <strong>{notifications.length}</strong>
+              <em className="neutral">Live from school alerts</em>
             </div>
           </article>
           <article>
@@ -176,8 +310,8 @@ function Notifications() {
             </span>
             <div>
               <small>Unread</small>
-              <strong>5</strong>
-              <em className="neutral">3.9% of total</em>
+              <strong>{unreadCount}</strong>
+              <em className="neutral">Needs review</em>
             </div>
           </article>
           <article>
@@ -186,8 +320,8 @@ function Notifications() {
             </span>
             <div>
               <small>Important</small>
-              <strong>12</strong>
-              <em className="neutral">9.4% of total</em>
+              <strong>{alertCount}</strong>
+              <em className="neutral">Safety and delay alerts</em>
             </div>
           </article>
           <article>
@@ -196,10 +330,8 @@ function Notifications() {
             </span>
             <div>
               <small>This week</small>
-              <strong>42</strong>
-              <em>
-                <FiArrowUp /> 12 vs last week
-              </em>
+              <strong>{thisWeekCount}</strong>
+              <em className="neutral">Last 7 days</em>
             </div>
           </article>
           <article>
@@ -208,7 +340,7 @@ function Notifications() {
             </span>
             <div>
               <small>Alerts</small>
-              <strong>7</strong>
+              <strong>{alertCount}</strong>
               <em className="neutral">Require attention</em>
             </div>
           </article>
@@ -237,48 +369,99 @@ function Notifications() {
               </label>
             </div>
             <div className="notification-list">
-              {filtered.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    className={`notification-row ${selected.title === item.title ? "selected" : ""} ${item.unread ? "unread" : ""}`}
-                    key={item.title}
-                    onClick={() => setSelected(item)}
-                  >
-                    <i className="unread-dot" />
-                    <span className={`notification-row-icon ${item.tone}`}>
-                      <Icon />
-                    </span>
-                    <span className="notification-row-copy">
-                      <strong>{item.title}</strong>
-                      <small>{item.text}</small>
-                      <em className={item.tone}>{item.tag}</em>
-                    </span>
-                    <time>{item.time}</time>
-                    <b>•••</b>
+              {loading && (
+                <div className="empty-notifications">
+                  Loading notifications...
+                </div>
+              )}
+              {!loading && error && (
+                <div className="empty-notifications">
+                  {error}{" "}
+                  <button type="button" onClick={loadNotifications}>
+                    Try again
                   </button>
-                );
-              })}
+                </div>
+              )}
+              {!loading &&
+                !error &&
+                paginatedNotifications.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      className={`notification-row ${selected?.id === item.id ? "selected" : ""} ${item.unread ? "unread" : "read"}`}
+                      key={item.id || `${item.title}-${item.created_at}`}
+                      onClick={() => selectNotification(item)}
+                    >
+                      <i className="unread-dot" />
+                      <span className={`notification-row-icon ${item.tone}`}>
+                        <Icon />
+                      </span>
+                      <span className="notification-row-copy">
+                        <strong>{item.title}</strong>
+                        <small>{item.text}</small>
+                        <em className={item.tone}>{item.tag}</em>
+                      </span>
+                      <time>{item.time}</time>
+                      <b>•••</b>
+                    </button>
+                  );
+                })}
             </div>
-            {filtered.length === 0 && (
+            {!loading && !error && filtered.length === 0 && (
               <div className="empty-notifications">
-                No notifications match your search.
+                No notifications yet. Emergency and transport updates will
+                appear here.
               </div>
             )}
             <div className="notifications-footer">
-              <span>Showing 1 to {filtered.length} of 128 notifications</span>
+              <span>
+                Showing{" "}
+                {filtered.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}{" "}
+                to {Math.min(currentPage * pageSize, filtered.length)} of{" "}
+                {filtered.length} notifications
+              </span>
               <div>
-                <button disabled>‹</button>
-                <button className="current-page">1</button>
-                <button>2</button>
-                <button>3</button>
-                <button>...</button>
-                <button>16</button>
-                <button>›</button>
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={currentPage === 1}
+                >
+                  ‹
+                </button>
+                {Array.from({ length: pageCount }, (_, index) => index + 1).map(
+                  (pageNumber) => (
+                    <button
+                      type="button"
+                      key={pageNumber}
+                      className={
+                        currentPage === pageNumber ? "current-page" : ""
+                      }
+                      onClick={() => setPage(pageNumber)}
+                    >
+                      {pageNumber}
+                    </button>
+                  ),
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPage((current) => Math.min(pageCount, current + 1))
+                  }
+                  disabled={currentPage === pageCount}
+                >
+                  ›
+                </button>
               </div>
               <label>
                 Rows per page{" "}
-                <select defaultValue="10">
+                <select
+                  value={pageSize}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                    setPage(1);
+                  }}
+                >
+                  <option>5</option>
                   <option>10</option>
                   <option>25</option>
                 </select>
@@ -286,74 +469,86 @@ function Notifications() {
             </div>
           </div>
           <aside className="notification-detail">
-            <div className="notification-detail-head">
-              <h2>Notification Details</h2>
-              <button aria-label="Close">×</button>
-            </div>
-            <div className="detail-map">
-              <FiTruck />
-              <span />
-              <i />
-              <i />
-              <i />
-            </div>
-            <div className="detail-body">
-              <span className="detail-label">
-                <FiTruck /> Trip Notification
-              </span>
-              <span className="detail-live">Live</span>
-              <h3>{selected.title}</h3>
-              <p>{selected.text}</p>
-              <div className="detail-box">
-                <p>
-                  <FiMap /> Route <strong>Route 1 - Brooklyn → School</strong>
-                </p>
-                <p>
-                  <FiUser /> Driver <strong>John Mokoena</strong>
-                </p>
-                <p>
-                  <FiTruck /> Vehicle{" "}
-                  <strong>
-                    Toyota Quantum
-                    <br />
-                    GP 45 CD GP
-                  </strong>
-                </p>
-                <p>
-                  <FiClock /> Start Time <strong>07:00 AM</strong>
-                </p>
-                <p>
-                  <FiMapPin /> Stopped At <strong>Stop 1 - Lynwood St</strong>
-                </p>
-                <p>
-                  <FiUsers /> Students On Board <strong>28</strong>
-                </p>
+            {!selected ? (
+              <div className="empty-notifications">
+                Select a notification to view its details.
               </div>
-              <small className="detail-time">
-                2 minutes ago • 21 May 2026, 07:02 AM
-              </small>
-            </div>
-            <div className="notification-quick">
-              <h2>Quick Actions</h2>
-              <div>
-                <button>
-                  <FiTruck />
-                  <span>View Trip</span>
-                </button>
-                <button>
-                  <FiPhone />
-                  <span>Contact Driver</span>
-                </button>
-                <button>
-                  <FiMap />
-                  <span>View Route</span>
-                </button>
-                <button>
-                  <FiShare2 />
-                  <span>Share Update</span>
-                </button>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="notification-detail-head">
+                  <h2>Notification Details</h2>
+                  <button
+                    type="button"
+                    aria-label="Close notification details"
+                    onClick={() => setSelected(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="detail-body">
+                  <span className="detail-label">
+                    <selected.icon /> {selected.tag} Notification
+                  </span>
+                  <span className="detail-live">
+                    {selected.unread ? "Unread" : "Read"}
+                  </span>
+                  <h3>{selected.title}</h3>
+                  <p>{selected.text}</p>
+                  <div className="detail-box">
+                    <p>
+                      <FiMapPin /> Related route{" "}
+                      <strong>
+                        {selected.route_name ||
+                          selected.related_route?.route_name ||
+                          selected.related_route_id ||
+                          "Not associated"}
+                      </strong>
+                    </p>
+                    <p>
+                      <FiUser /> From{" "}
+                      <strong>{selected.sender_name || "System"}</strong>
+                    </p>
+                    {selected.recipient_name ? (
+                      <p>
+                        <FiUsers /> To{" "}
+                        <strong>{selected.recipient_name}</strong>
+                      </p>
+                    ) : null}
+                    <p>
+                      <FiTruck /> Child{" "}
+                      <strong>
+                        {selected.child_name ||
+                          selected.related_child?.name ||
+                          selected.children?.name ||
+                          selected.related_child_id ||
+                          "Not associated"}
+                      </strong>
+                    </p>
+                    <p>
+                      <FiClock /> Status{" "}
+                      <strong>{selected.unread ? "Unread" : "Read"}</strong>
+                    </p>
+                    <p>
+                      <FiMapPin /> Type{" "}
+                      <strong>{selected.type || "general"}</strong>
+                    </p>
+                    {selected.stop_address || selected.related_stop?.address ? (
+                      <p>
+                        <FiMapPin /> Stop{" "}
+                        <strong>
+                          {selected.stop_address ||
+                            selected.related_stop.address}
+                        </strong>
+                      </p>
+                    ) : null}
+                    <p>
+                      <FiUsers /> Received <strong>{selected.time}</strong>
+                    </p>
+                  </div>
+                  <small className="detail-time">{selected.time}</small>
+                </div>
+              </>
+            )}
           </aside>
         </section>
       </div>

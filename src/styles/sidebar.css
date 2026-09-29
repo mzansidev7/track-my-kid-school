@@ -141,6 +141,7 @@
 }
 
 .portal-nav-link {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -181,15 +182,21 @@
 }
 
 .portal-nav-badge {
-  display: grid;
-  width: 16px;
-  height: 16px;
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
   margin-left: auto;
-  place-items: center;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   background: #fb7185;
   color: #fff;
   font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .sidebar-user {

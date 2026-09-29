@@ -1,7 +1,16 @@
 .members-content {
-  min-height: calc(100svh - 48px);
+  box-sizing: border-box;
+  max-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: #fff;
   color: #334155;
+  height: 100%;
+}
+.settings-main > .members-content {
+  min-height: auto;
+  padding: 0;
 }
 .members-heading {
   display: flex;
@@ -235,6 +244,43 @@
   background: #f1f5f9;
   color: #64748b;
 }
+.member-status-toggle {
+  width: 42px;
+  height: 24px;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: #9ca3af;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.member-status-toggle[aria-checked="true"] {
+  background: #16a34a;
+}
+.member-status-toggle-thumb {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+}
+.member-status-toggle[aria-checked="true"] .member-status-toggle-thumb {
+  transform: translateX(18px);
+}
+.member-status-toggle:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.member-status-toggle em {
+  font-style: normal;
+}
+.member-verification-hint {
+  display: block;
+  margin-top: 3px;
+  color: #b45309;
+  font-size: 8px;
+}
 .member-action {
   width: 27px;
   height: 27px;
@@ -320,6 +366,19 @@
   padding: 11px;
   color: #334155;
   font-size: 12px;
+}
+.member-active-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 12px;
+}
+.member-form .member-active-field input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
 }
 .member-submit {
   border: 0;

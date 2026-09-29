@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiAlertCircle,
   FiChevronDown,
@@ -7,381 +7,527 @@ import {
   FiLayers,
   FiMapPin,
   FiPhone,
-  // FiSearch,
   FiUsers,
 } from "react-icons/fi";
 import { FaBus } from "react-icons/fa";
+import { apiRequest } from "../api";
+import { supabaseClient } from "../supabaseClient";
 import "../styles/liveTracking.css";
 
-const activeTrips = [
-  {
-    vehicle: "GP 45 CD GP",
-    driver: "John Mokoena",
-    route: "Route 1",
-    location: "Justice St (Stop 4)",
-    speed: "36 km/h",
-    eta: "07:45 AM",
-    progress: "62%",
-    status: "On Route",
-    tone: "purple",
-  },
-  {
-    vehicle: "GP 12 AB GP",
-    driver: "Sarah Jacobs",
-    route: "Route 2",
-    location: "Park St (Stop 3)",
-    speed: "22 km/h",
-    eta: "07:50 AM",
-    progress: "48%",
-    status: "Delayed",
-    tone: "blue",
-  },
-  {
-    vehicle: "GP 78 XY GP",
-    driver: "Thabo Nkosi",
-    route: "Route 3",
-    location: "Arcadia St (Stop 2)",
-    speed: "28 km/h",
-    eta: "07:47 AM",
-    progress: "33%",
-    status: "On Route",
-    tone: "green",
-  },
-];
+function getAuth() {
+  try {
+    return JSON.parse(localStorage.getItem("schoolAuth") || "{}");
+  } catch {
+    return {};
+  }
+}
 
 function LiveTracking() {
-  const [selectedVehicle, setSelectedVehicle] = useState(activeTrips[0]);
+  const auth = getAuth();
+  const cacheKey = `schoolTrackingCache:${auth.user?.id || "current"}`;
+  const [tracking, setTracking] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(cacheKey) || "null")?.data || null;
+    } catch {
+      return null;
+    }
+  });
+  const [selectedId, setSelectedId] = useState(null);
+  const loadTracking = useCallback(async () => {
+    const data = await apiRequest("/school/tracking", {
+      headers: { Authorization: `Bearer ${auth.token || ""}` },
+    });
+    localStorage.setItem(
+      cacheKey,
+      JSON.stringify({ data, timestamp: Date.now() }),
+    );
+    setTracking(data);
+  }, [auth.token, cacheKey]);
+
+  useEffect(() => {
+    apiRequest("/school/tracking", {
+      headers: { Authorization: `Bearer ${auth.token || ""}` },
+    })
+      .then((data) => {
+        localStorage.setItem(
+          cacheKey,
+          JSON.stringify({ data, timestamp: Date.now() }),
+        );
+        setTracking(data);
+      })
+      .catch(() => undefined);
+  }, [auth.token, cacheKey]);
+
+  useEffect(() => {
+    if (!supabaseClient) return undefined;
+    const channel = supabaseClient
+      .channel(`school-tracking:${auth.user?.id || "current"}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "driver_locations" },
+        loadTracking,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tracking_sessions" },
+        loadTracking,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "route_assignments" },
+        loadTracking,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "route_children" },
+        loadTracking,
+      )
+      .subscribe();
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  }, [auth.user?.id, loadTracking]);
+
+  const trips = useMemo(() => tracking?.trips || [], [tracking?.trips]);
+  const mapTrips = useMemo(
+    () =>
+      trips.filter((trip) => trip.is_active_route && trip.is_in_time_window),
+    [trips],
+  );
+  const selectedTrip =
+    trips.find((trip) => trip.id === selectedId) || trips[0] || null;
+  const selectedMapTrip =
+    mapTrips.find((trip) => trip.id === selectedId) ||
+    (selectedId ? null : mapTrips[0]) ||
+    null;
+  const parseCoordinate = (latitude, longitude, fallback) => {
+    const parsedLatitude = Number(latitude);
+    const parsedLongitude = Number(longitude);
+    if (Number.isFinite(parsedLatitude) && Number.isFinite(parsedLongitude)) {
+      return { latitude: parsedLatitude, longitude: parsedLongitude };
+    }
+    const values = String(fallback || "")
+      .split(",")
+      .map((value) => Number(value.trim()));
+    return Number.isFinite(values[0]) && Number.isFinite(values[1])
+      ? { latitude: values[0], longitude: values[1] }
+      : null;
+  };
+  const selectedRoutePoints = useMemo(() => {
+    if (!selectedMapTrip) return [];
+    return [
+      parseCoordinate(
+        selectedMapTrip.start_latitude,
+        selectedMapTrip.start_longitude,
+        selectedMapTrip.start_location,
+      ),
+      ...(selectedMapTrip.stops || []).map((stop) =>
+        parseCoordinate(stop.latitude, stop.longitude, stop.address),
+      ),
+      parseCoordinate(
+        selectedMapTrip.end_latitude,
+        selectedMapTrip.end_longitude,
+        selectedMapTrip.end_location,
+      ),
+    ].filter(Boolean);
+  }, [selectedMapTrip]);
+  const mapBounds = useMemo(() => {
+    if (!selectedRoutePoints.length) return null;
+    const latitudes = selectedRoutePoints.map((point) => point.latitude);
+    const longitudes = selectedRoutePoints.map((point) => point.longitude);
+    const minLatitude = Math.min(...latitudes);
+    const maxLatitude = Math.max(...latitudes);
+    const minLongitude = Math.min(...longitudes);
+    const maxLongitude = Math.max(...longitudes);
+    return { minLatitude, maxLatitude, minLongitude, maxLongitude };
+  }, [selectedRoutePoints]);
+  const getMapPoint = (point) => {
+    if (!mapBounds) return null;
+    const latitudeRange =
+      mapBounds.maxLatitude - mapBounds.minLatitude || 0.001;
+    const longitudeRange =
+      mapBounds.maxLongitude - mapBounds.minLongitude || 0.001;
+    return {
+      x:
+        10 + ((point.longitude - mapBounds.minLongitude) / longitudeRange) * 80,
+      y:
+        10 +
+        (1 - (point.latitude - mapBounds.minLatitude) / latitudeRange) * 80,
+    };
+  };
+  const metrics = tracking?.metrics || {};
+  const formatTime = (value) =>
+    value
+      ? new Date(value).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "Not available";
+  const formatScheduleTime = (value) => {
+    if (!value) return "Not set";
+    const [hours, minutes] = value.slice(0, 5).split(":").map(Number);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return "Not set";
+    return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+  const formatTripStartTime = (trip) =>
+    trip?.session?.started_at
+      ? formatTime(trip.session.started_at)
+      : formatScheduleTime(trip?.departure_time);
+  const activeCount = metrics.activeVehicles || 0;
+  const totalStudents = metrics.students || 0;
+  const onlineStudents = useMemo(
+    () =>
+      trips
+        .filter((trip) => trip.is_online)
+        .reduce((total, trip) => total + trip.students, 0),
+    [trips],
+  );
 
   return (
-    <>
-      {/* <header className="portal-topbar">
-        <div className="portal-breadcrumb">
-          <span>Schools</span>
-          <b>›</b>
-          <strong>Live Tracking</strong>
+    <div className="portal-content tracking-content">
+      <section className="tracking-heading">
+        <div>
+          <p className="page-kicker">REAL-TIME MONITORING</p>
+          <h1>Live Tracking</h1>
+          <p>Track vehicles and students in real-time.</p>
         </div>
-        <div className="portal-top-actions">
-          <label className="portal-search">
-            <FiSearch />
-            <input placeholder="Search vehicles..." />
-          </label>
-          <button className="icon-button" aria-label="Notifications">
-            <FiAlertCircle />
-            <b>5</b>
+        <div className="tracking-controls">
+          <button>
+            All Routes <FiChevronDown />
           </button>
-          <div className="top-profile">
-            <img src="https://i.pravatar.cc/100?img=5" alt="School admin" />
-            <span>
-              <strong>School Admin</strong>
-              <small>Administrator</small>
-            </span>
-            <b>⌄</b>
-          </div>
+          <button>
+            <FiAlertCircle /> Live data
+          </button>
+          <button aria-label="Full screen">⛶</button>
         </div>
-      </header> */}
-      <div className="portal-content tracking-content">
-        <section className="tracking-heading">
+      </section>
+      <section className="tracking-metrics">
+        <article>
+          <span className="tracking-metric green">
+            <FaBus />
+          </span>
           <div>
-            <p className="page-kicker">REAL-TIME MONITORING</p>
-            <h1>Live Tracking</h1>
-            <p>Track vehicles and trips in real-time.</p>
+            <small>Active vehicles</small>
+            <strong>{activeCount}</strong>
+            <em>Online now</em>
           </div>
-          <div className="tracking-controls">
-            <button>
-              All Routes <FiChevronDown />
-            </button>
-            <button>
-              <FiAlertCircle /> Filters
-            </button>
-            <button aria-label="Full screen">⛶</button>
+        </article>
+        <article>
+          <span className="tracking-metric green">
+            <FiClock />
+          </span>
+          <div>
+            <small>Students in transport</small>
+            <strong>{onlineStudents}</strong>
+            <em>Live assignments</em>
           </div>
-        </section>
-        <section className="tracking-metrics">
-          <article>
-            <span className="tracking-metric green">
-              <FaBus />
-            </span>
-            <div>
-              <small>Active vehicles</small>
-              <strong>18</strong>
-              <em>On the move</em>
-            </div>
-          </article>
-          <article>
-            <span className="tracking-metric green">
-              <FiClock />
-            </span>
-            <div>
-              <small>On time</small>
-              <strong>15</strong>
-              <em>83.3%</em>
-            </div>
-          </article>
-          <article>
-            <span className="tracking-metric orange">
-              <FiClock />
-            </span>
-            <div>
-              <small>Delayed</small>
-              <strong>3</strong>
-              <em>16.7%</em>
-            </div>
-          </article>
-          <article>
-            <span className="tracking-metric purple">
-              <FiCrosshair />
-            </span>
-            <div>
-              <small>Completed trips</small>
-              <strong>22</strong>
-              <em>Today</em>
-            </div>
-          </article>
-          <article>
-            <span className="tracking-metric blue">
-              <FiUsers />
-            </span>
-            <div>
-              <small>Total students</small>
-              <strong>368</strong>
-              <em>Being transported</em>
-            </div>
-          </article>
-        </section>
-        <section className="tracking-layout">
-          <div className="tracking-main">
-            <div className="tracking-map">
-              <div className="map-switch">
-                <button className="selected">Map</button>
-                <button>Satellite</button>
-              </div>
-              <div className="map-controls">
-                <button>+</button>
-                <button>-</button>
-                <button>
-                  <FiCrosshair />
-                </button>
-                <button>
-                  <FiLayers />
-                </button>
-              </div>
-              <div className="map-roads">
-                <span className="road road-purple" />
-                <span className="road road-blue" />
-                <span className="road road-green" />
-                <span className="map-label brooklyn">Brooklyn</span>
-                <span className="map-label arcadia">Arcadia</span>
-                <span className="map-label hatfield">Hatfield</span>
-                <span className="map-label lynwood">Lynwood</span>
-              </div>
-              <div className="map-route route-one">
-                <i />
-                <i />
-                <i />
-                <i />
-                <b>
-                  <FaBus />
-                </b>
-              </div>
-              <div className="map-route route-two">
-                <i />
-                <i />
-                <i />
-                <b>
-                  <FaBus />
-                </b>
-              </div>
-              <div className="map-route route-three">
-                <i />
-                <i />
-                <b>
-                  <FaBus />
-                </b>
-              </div>
-              <div className="vehicle-popover">
-                <strong>{selectedVehicle.vehicle}</strong>
-                <span>On Route</span>
-                <small>👤 {selectedVehicle.driver}</small>
-                <small>
-                  <FiMapPin /> {selectedVehicle.route} - Brooklyn → School
-                </small>
-              </div>
-              <div className="map-legend">
-                <strong>Vehicle Status</strong>
-                <span>
-                  <i className="legend-green" /> On Route
-                </span>
-                <span>
-                  <i className="legend-orange" /> Delayed
-                </span>
-                <span>
-                  <i className="legend-blue" /> Stopped
-                </span>
-                <span>
-                  <i className="legend-gray" /> Offline
-                </span>
-              </div>
-            </div>
-            <div className="active-trips">
-              <div className="active-trips-head">
-                <h2>Active Trips</h2>
-                <span>Updated just now</span>
-              </div>
-              <div className="active-trips-table">
-                <div className="active-trip-row active-trip-header">
-                  <span>Vehicle</span>
-                  <span>Driver</span>
-                  <span>Route</span>
-                  <span>Status</span>
-                  <span>Current Location</span>
-                  <span>Speed</span>
-                  <span>ETA</span>
-                  <span>Progress</span>
-                  <span />
-                </div>
-                {activeTrips.map((trip) => (
-                  <button
-                    className={`active-trip-row ${selectedVehicle.vehicle === trip.vehicle ? "selected" : ""}`}
-                    key={trip.vehicle}
-                    onClick={() => setSelectedVehicle(trip)}
-                  >
-                    <span>
-                      <b className={`mini-vehicle ${trip.tone}`}>
-                        <FaBus />
-                      </b>
-                      {trip.vehicle}
-                    </span>
-                    <span>{trip.driver}</span>
-                    <span>
-                      {trip.route}
-                      <small>Morning → School</small>
-                    </span>
-                    <span>
-                      <em
-                        className={`tracking-status ${trip.status.toLowerCase().replace(" ", "-")}`}
-                      >
-                        {trip.status}
-                      </em>
-                    </span>
-                    <span>{trip.location}</span>
-                    <span className="speed-tag">{trip.speed}</span>
-                    <span>{trip.eta}</span>
-                    <span>
-                      <strong>{trip.progress}</strong>
-                      <i className={`progress-bar ${trip.tone}`} />
-                    </span>
-                    <span>
-                      <FiMapPin /> •••
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <button className="all-trips-link">View All Trips →</button>
-            </div>
+        </article>
+        <article>
+          <span className="tracking-metric orange">
+            <FiClock />
+          </span>
+          <div>
+            <small>Offline vehicles</small>
+            <strong>{trips.filter((trip) => !trip.is_online).length}</strong>
+            <em>Awaiting location</em>
           </div>
-          <aside className="selected-vehicle">
-            <div className="selected-vehicle-head">
-              <div>
-                <h2>Selected Vehicle</h2>
-              </div>
-              <button aria-label="Close">×</button>
+        </article>
+        <article>
+          <span className="tracking-metric purple">
+            <FiCrosshair />
+          </span>
+          <div>
+            <small>Routes tracked</small>
+            <strong>{new Set(trips.map((trip) => trip.route_id)).size}</strong>
+            <em>Current assignments</em>
+          </div>
+        </article>
+        <article>
+          <span className="tracking-metric blue">
+            <FiUsers />
+          </span>
+          <div>
+            <small>Total students</small>
+            <strong>{totalStudents}</strong>
+            <em>School records</em>
+          </div>
+        </article>
+      </section>
+      <section className="tracking-layout">
+        <div className="tracking-main">
+          <div className="tracking-map">
+            <div className="map-switch">
+              <button className="selected">Map</button>
+              <button>Satellite</button>
             </div>
-            <div className="vehicle-profile">
-              <span className="vehicle-large">
-                <FaBus />
-              </span>
-              <div>
-                <strong>{selectedVehicle.vehicle}</strong>
-                <small>Toyota Quantum</small>
-                <small>Driver: {selectedVehicle.driver}</small>
-              </div>
-              <span className="on-route">On Route</span>
-              <button aria-label="Call driver">
-                <FiPhone />
+            <div className="map-controls">
+              <button>+</button>
+              <button>-</button>
+              <button>
+                <FiCrosshair />
+              </button>
+              <button>
+                <FiLayers />
               </button>
             </div>
-            <div className="route-summary">
-              <div>
-                <strong>{selectedVehicle.route} - Brooklyn → School</strong>
-                <small>Trip #TRP-00123</small>
-              </div>
-              <dl>
-                <dt>Start Time</dt>
-                <dd>07:00 AM</dd>
-                <dt>Est. Arrival</dt>
-                <dd>07:45 AM</dd>
-                <dt>Progress</dt>
-                <dd>62%</dd>
-              </dl>
-              <i className="detail-progress" />
-            </div>
-            <div className="next-stop">
-              <div>
-                <h3>Next Stop</h3>
-                <strong>
-                  <FiMapPin /> Justice St (Stop 4)
-                </strong>
-                <small>3.2 km away</small>
-              </div>
-              <b>
-                ETA<em>5 min</em>
-              </b>
-            </div>
-            <div className="all-stops">
-              <h3>All Stops (9)</h3>
-              {[
-                "Brooklyn Start Point",
-                "First Ave (Stop 1)",
-                "Main Rd (Stop 2)",
-                "Park St (Stop 3)",
-                "Justice St (Stop 4)",
-                "Lynwood St (Stop 5)",
-                "Arcadia St (Stop 6)",
-                "Pretoria High School (Stop 7)",
-                "Sunshine Primary School",
-              ].map((stop, index) => (
-                <div
-                  className={`stop-row ${index === 4 ? "current" : index < 4 ? "completed" : ""}`}
-                  key={stop}
+            <div className="map-roads" />
+            {selectedRoutePoints.length > 1 && (
+              <svg
+                className="map-route-line"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                <polyline
+                  points={selectedRoutePoints
+                    .map((point) => {
+                      const position = getMapPoint(point);
+                      return `${position.x},${position.y}`;
+                    })
+                    .join(" ")}
+                />
+              </svg>
+            )}
+            {selectedMapTrip?.stops?.map((stop) => {
+              const position = getMapPoint(stop);
+              if (!position) return null;
+              return (
+                <span
+                  className="map-stop"
+                  key={stop.id}
+                  style={{ left: `${position.x}%`, top: `${position.y}%` }}
+                  title={`${stop.stop_type || "Stop"}: ${stop.address || "Location"}`}
                 >
-                  <i>{index < 4 ? "✓" : index === 4 ? "•" : ""}</i>
+                  {stop.stop_order}
+                </span>
+              );
+            })}
+            {(selectedMapTrip || !selectedId ? mapTrips : [])
+              .slice(0, 3)
+              .map((trip, index) => (
+                <button
+                  key={trip.id}
+                  className={`map-route route-${["one", "two", "three"][index]}`}
+                  onClick={() => setSelectedId(trip.id)}
+                  aria-label={`Select ${trip.route_name}`}
+                >
+                  <i />
+                  <i />
+                  <i />
+                  <b>
+                    <FaBus />
+                  </b>
+                </button>
+              ))}
+            {!selectedMapTrip && (
+              <div className="tracking-map-empty">
+                This vehicle is offline or outside its tracking window.
+              </div>
+            )}
+            {selectedMapTrip && (
+              <div className="vehicle-popover">
+                <strong>
+                  {selectedMapTrip.vehicle?.license_plate ||
+                    selectedMapTrip.vehicle?.name ||
+                    "Vehicle"}
+                </strong>
+                <span>{selectedMapTrip.status}</span>
+                <small>
+                  <FiUsers /> {selectedMapTrip.students} students
+                </small>
+                <small>
+                  <FiMapPin /> {selectedMapTrip.route_name}
+                </small>
+              </div>
+            )}
+            <div className="map-legend">
+              <strong>Vehicle Status</strong>
+              <span>
+                <i className="legend-green" /> On Route
+              </span>
+              <span>
+                <i className="legend-orange" /> Stopped
+              </span>
+              <span>
+                <i className="legend-gray" /> Offline
+              </span>
+            </div>
+          </div>
+          <div className="active-trips">
+            <div className="active-trips-head">
+              <h2>Active Trips</h2>
+              <span>Updated live</span>
+            </div>
+            <div className="active-trips-table">
+              <div className="active-trip-row active-trip-header">
+                <span>Vehicle</span>
+                <span>Driver</span>
+                <span>Route</span>
+                <span>Status</span>
+                <span>Window</span>
+                <span>Location</span>
+                <span>Students</span>
+                <span>Updated</span>
+                <span />
+              </div>
+              {trips.map((trip) => (
+                <button
+                  className={`active-trip-row ${selectedTrip?.id === trip.id ? "selected" : ""}`}
+                  key={trip.id}
+                  onClick={() => setSelectedId(trip.id)}
+                >
                   <span>
-                    {stop}
+                    <b className="mini-vehicle green">
+                      <FaBus />
+                    </b>
+                    {trip.vehicle?.license_plate ||
+                      trip.vehicle?.name ||
+                      "Vehicle"}
+                    <small>{trip.vehicle?.model || "Model unavailable"}</small>
+                  </span>
+                  <span>
+                    {trip.driver?.users?.name || "Driver not assigned"}
                     <small>
-                      {index === 0
-                        ? "Departed"
-                        : index === 4
-                          ? "Next stop"
-                          : index === 8
-                            ? "Final destination"
-                            : ""}
+                      {trip.driver?.users?.phone || "No phone number"}
                     </small>
                   </span>
-                  <b>
-                    {
-                      [
-                        "07:00 AM",
-                        "07:05 AM",
-                        "07:10 AM",
-                        "07:15 AM",
-                        "07:20 AM",
-                        "07:25 AM",
-                        "07:30 AM",
-                        "07:35 AM",
-                        "07:45 AM",
-                      ][index]
-                    }
-                  </b>
-                </div>
+                  <span>
+                    {trip.route_name}
+                    <small>
+                      {trip.start_location || "Start pending"} →{" "}
+                      {trip.end_location || "Destination pending"}
+                    </small>
+                  </span>
+                  <span>
+                    <em
+                      className={`tracking-status ${trip.status.toLowerCase().replace(" ", "-")}`}
+                    >
+                      {trip.status}
+                    </em>
+                  </span>
+                  <span>
+                    <strong className="trip-window-period">
+                      Morning window
+                    </strong>
+                    <small>
+                      {formatScheduleTime(trip.pickup_start_time)} -{" "}
+                      {formatScheduleTime(trip.pickup_end_time)}
+                    </small>
+                    <strong className="trip-window-period afternoon">
+                      Afternoon window
+                    </strong>
+                    <small>
+                      {formatScheduleTime(trip.dropoff_start_time)} -{" "}
+                      {formatScheduleTime(trip.dropoff_end_time)}
+                    </small>
+                  </span>
+                  <span
+                    className="trip-location"
+                    role="button"
+                    tabIndex={0}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedId(trip.id);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSelectedId(trip.id);
+                      }
+                    }}
+                    title="Show route and stops on map"
+                  >
+                    {trip.location ? "View on map" : "No live location"}
+                  </span>
+                  <span>{trip.students}</span>
+                  <span>{formatTime(trip.location?.recorded_at)}</span>
+                  <span>
+                    <FiMapPin />
+                  </span>
+                </button>
               ))}
             </div>
-            <button className="trip-details-button">
-              View Full Trip Details →
+            {!trips.length && (
+              <div className="empty-students">
+                No transport assignments found.
+              </div>
+            )}
+          </div>
+        </div>
+        <aside className="selected-vehicle">
+          <div className="selected-vehicle-head">
+            <h2>Selected Vehicle</h2>
+            <button aria-label="Close" onClick={() => setSelectedId(null)}>
+              ×
             </button>
-          </aside>
-        </section>
-      </div>
-    </>
+          </div>
+          {selectedTrip ? (
+            <>
+              <div className="vehicle-profile">
+                <span className="vehicle-large">
+                  <FaBus />
+                </span>
+                <div>
+                  <strong>
+                    {selectedTrip.vehicle?.license_plate ||
+                      selectedTrip.vehicle?.name ||
+                      "Vehicle"}
+                  </strong>
+                  <small>
+                    {selectedTrip.vehicle?.model || "Model unavailable"}
+                  </small>
+                  <small>
+                    Driver: {selectedTrip.driver?.users?.name || "Not assigned"}
+                  </small>
+                </div>
+                <span className="on-route">{selectedTrip.status}</span>
+                <button aria-label="Call driver">
+                  <FiPhone />
+                </button>
+              </div>
+              <div className="route-summary">
+                <div>
+                  <strong>{selectedTrip.route_name}</strong>
+                  <small>{selectedTrip.students} students assigned</small>
+                </div>
+                <dl>
+                  <dt>Start Time</dt>
+                  <dd>{formatTripStartTime(selectedTrip)}</dd>
+                  <dt>Last update</dt>
+                  <dd>{formatTime(selectedTrip.location?.recorded_at)}</dd>
+                  <dt>Status</dt>
+                  <dd>{selectedTrip.status}</dd>
+                </dl>
+                <i className="detail-progress" />
+              </div>
+              <div className="next-stop">
+                <div>
+                  <h3>Location</h3>
+                  <strong>
+                    <FiMapPin />{" "}
+                    {selectedTrip.location
+                      ? `${selectedTrip.location.latitude}, ${selectedTrip.location.longitude}`
+                      : "Unavailable"}
+                  </strong>
+                  <small>
+                    {selectedTrip.is_online
+                      ? "Live location"
+                      : "Waiting for driver location"}
+                  </small>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="empty-students">
+              Select a vehicle to see details.
+            </div>
+          )}
+        </aside>
+      </section>
+    </div>
   );
 }
 

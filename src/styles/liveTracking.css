@@ -212,6 +212,37 @@
       transparent 71%
     );
 }
+.map-route-line {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.map-route-line polyline {
+  fill: none;
+  stroke: #6030d2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+.map-stop {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 2px solid #6030d2;
+  border-radius: 50%;
+  background: #fff;
+  color: #6030d2;
+  font-size: 7px;
+  font-weight: 800;
+  transform: translate(-50%, -50%);
+}
 road {
   position: absolute;
   display: block;
@@ -288,6 +319,23 @@ lynwood {
   background: currentColor;
   color: #fff;
   font-size: 13px;
+}
+.tracking-map-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: min(260px, calc(100% - 32px));
+  padding: 14px 16px;
+  border: 1px solid #dce4eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 6px 16px #4050601c;
 }
 .route-one {
   top: 100px;
@@ -416,7 +464,7 @@ lynwood {
 }
 .active-trip-row {
   display: grid;
-  grid-template-columns: 1.3fr 1.15fr 1fr 0.9fr 1.4fr 0.8fr 0.8fr 0.85fr 42px;
+  grid-template-columns: 1.25fr 1.2fr 1.25fr 0.85fr 1.2fr 1.35fr 0.65fr 0.85fr 32px;
   width: 100%;
   min-width: 850px;
   align-items: center;
@@ -444,11 +492,29 @@ lynwood {
 .active-trip-row > span {
   min-width: 0;
 }
+.trip-location {
+  cursor: pointer;
+  color: #6030d2;
+  font-weight: 700;
+}
+.trip-location:focus-visible {
+  outline: 2px solid #6030d2;
+  outline-offset: 2px;
+}
 .active-trip-row > span small {
   display: block;
   margin-top: 2px;
   color: #64748b;
   font-size: 8px;
+}
+.trip-window-period {
+  display: block;
+  margin-top: 2px;
+  color: #334155;
+  font-size: 9px;
+}
+.trip-window-period.afternoon {
+  margin-top: 6px;
 }
 .mini-vehicle {
   display: inline-grid;

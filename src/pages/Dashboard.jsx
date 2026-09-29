@@ -17,24 +17,9 @@ import { FaBus } from "react-icons/fa";
 import "../styles/dashboard.css";
 import { useEffect, useRef, useState } from "react";
 import { apiRequest } from "../api";
-import { useNavigate } from "react-router-dom";
+import { supabaseClient } from "../supabaseClient";
 
-const trips = [
-  ["Route 1 - Morning", "06:30 AM - 08:00 AM", "35 Students", "1h 12m"],
-  ["Route 2 - Morning", "06:45 AM - 08:10 AM", "28 Students", "1h 05m"],
-  ["Route 3 - Morning", "07:00 AM - 08:20 AM", "32 Students", "1h 20m"],
-  ["Route 4 - Morning", "07:15 AM - 08:30 AM", "31 Students", "1h 15m"],
-];
-
-
-
-function MetricCard({
-  icon,
-  label,
-  value,
-  detail,
-  tone,
-}) {
+function MetricCard({ icon, label, value, detail, tone }) {
   return (
     <article className={`metric-card ${tone}`}>
       <div className="metric-icon">{icon}</div>
@@ -57,13 +42,7 @@ function PanelHeading({ title, action }) {
     </div>
   );
 }
-function Announcement({
-  icon,
-  title,
-  tag,
-  text,
-  time,
-}) {
+function Announcement({ icon, title, tag, text, time }) {
   return (
     <div className="announcement-row">
       <div className="announcement-icon">{icon}</div>
@@ -80,7 +59,6 @@ function Announcement({
 }
 
 export default function Dashboard() {
-  const navigate = useNavigate();
   const profileMenuRef = useRef(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const auth = (() => {
@@ -91,6 +69,7 @@ export default function Dashboard() {
     }
   })();
   const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
+  const dashboardCacheKey = `schoolDashboardCache:${auth.user?.id || "current"}`;
   const [school, setSchool] = useState(() => {
     try {
       const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
@@ -102,7 +81,22 @@ export default function Dashboard() {
   const [admin, setAdmin] = useState(() => {
     try {
       const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
-      return cached?.data?.admin_profile || auth.user?.admin_profile || auth.admin_profile || null;
+      return (
+        cached?.data?.admin_profile ||
+        auth.user?.admin_profile ||
+        auth.admin_profile ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  });
+  const [dashboard, setDashboard] = useState(() => {
+    try {
+      return (
+        JSON.parse(localStorage.getItem(dashboardCacheKey) || "null")?.data ||
+        null
+      );
     } catch {
       return null;
     }
@@ -125,7 +119,10 @@ export default function Dashboard() {
             Authorization: `Bearer ${auth.token || ""}`,
           },
         });
-        localStorage.setItem(cacheKey, JSON.stringify({ data: freshSchool, timestamp: Date.now() }));
+        localStorage.setItem(
+          cacheKey,
+          JSON.stringify({ data: freshSchool, timestamp: Date.now() }),
+        );
         if (active) {
           setSchool(freshSchool);
           setAdmin(freshSchool.admin_profile || null);
@@ -136,12 +133,104 @@ export default function Dashboard() {
     };
 
     loadSchool();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [auth.token, cacheKey]);
 
   useEffect(() => {
+    let active = true;
+    const loadDashboard = async () => {
+      try {
+        const freshDashboard = await apiRequest("/school/dashboard", {
+          headers: { Authorization: `Bearer ${auth.token || ""}` },
+        });
+        localStorage.setItem(
+          dashboardCacheKey,
+          JSON.stringify({ data: freshDashboard, timestamp: Date.now() }),
+        );
+        if (active) {
+          setDashboard(freshDashboard);
+          setSchool(freshDashboard.school);
+        }
+      } catch {
+        // Keep cached dashboard data visible when the API is unavailable.
+      }
+    };
+
+    loadDashboard();
+    return () => {
+      active = false;
+    };
+  }, [auth.token, dashboardCacheKey]);
+
+  useEffect(() => {
+    const schoolId = dashboard?.school?.id || school?.id;
+    if (!supabaseClient || !schoolId) return undefined;
+
+    const refreshDashboard = () => {
+      apiRequest("/school/dashboard", {
+        headers: { Authorization: `Bearer ${auth.token || ""}` },
+      })
+        .then((freshDashboard) => {
+          localStorage.setItem(
+            dashboardCacheKey,
+            JSON.stringify({ data: freshDashboard, timestamp: Date.now() }),
+          );
+          setDashboard(freshDashboard);
+          setSchool(freshDashboard.school);
+        })
+        .catch(() => undefined);
+    };
+
+    const channel = supabaseClient
+      .channel(`school-dashboard:${schoolId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "schools",
+          filter: `id=eq.${schoolId}`,
+        },
+        refreshDashboard,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "children",
+          filter: `school_id=eq.${schoolId}`,
+        },
+        refreshDashboard,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "route_children" },
+        refreshDashboard,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "routes" },
+        refreshDashboard,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "route_assignments" },
+        refreshDashboard,
+      )
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  }, [auth.token, dashboard?.school?.id, school?.id, dashboardCacheKey]);
+
+  useEffect(() => {
     const closeMenu = (event) => {
-      if (!profileMenuRef.current?.contains(event.target)) setProfileOpen(false);
+      if (!profileMenuRef.current?.contains(event.target))
+        setProfileOpen(false);
     };
     const closeOnEscape = (event) => {
       if (event.key === "Escape") setProfileOpen(false);
@@ -157,18 +246,49 @@ export default function Dashboard() {
   const logout = () => {
     localStorage.removeItem("schoolAuth");
     localStorage.removeItem(cacheKey);
+    sessionStorage.removeItem("schoolAuth");
     setProfileOpen(false);
-    navigate("/login", { replace: true });
+    window.location.replace("/login");
   };
 
   const schoolName = school?.name || "ABC Primary School";
   const schoolAddress = school?.address || "School address not available";
   const schoolPhone = school?.phone || "Phone not available";
-  const schoolEmail = school?.email || "Email not available";
+  const schoolEmail =
+    school?.school_email || school?.email || "Email not available";
   const schoolProvince = school?.province || "Province not available";
   const schoolCode = school?.emis_number || "—";
-  const principalName = school?.principal_name || school?.contact_person || "Not available";
-  const schoolStatus = school?.status === "active" ? "Active" : "Pending approval";
+  const principalName =
+    school?.principal_name || school?.contact_person || "Not available";
+  const schoolStatus =
+    school?.status === "active" ? "Active" : "Pending approval";
+  const students = dashboard?.students || [];
+  const routes = dashboard?.routes || [];
+  const activeAssignments = routes.flatMap((route) =>
+    (route.assignments || []).filter((assignment) => assignment.is_active),
+  );
+  const activeVehicles = new Set(
+    activeAssignments
+      .map((assignment) => assignment.vehicle_id)
+      .filter(Boolean),
+  ).size;
+  const activeDrivers = new Set(
+    activeAssignments
+      .map((assignment) => assignment.drivers)
+      .filter((driver) => driver?.status === "active")
+      .map((driver) => driver.id),
+  ).size;
+  const activeRoutes = routes.filter((route) =>
+    (route.assignments || []).some((assignment) => assignment.is_active),
+  ).length;
+  const formatRouteTime = (value) =>
+    value
+      ? new Date(value).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "Time not scheduled";
+  const trips = routes.slice(0, 4);
 
   return (
     <>
@@ -196,15 +316,28 @@ export default function Dashboard() {
               onClick={() => setProfileOpen((open) => !open)}
             >
               <span>
-              <strong>{admin?.first_name || "School"} {admin?.last_name || "Admin"}</strong>
-              <small>{admin?.job_title || admin?.role || "School Admin"}</small>
+                <strong>
+                  {admin?.first_name || "School"} {admin?.last_name || "Admin"}
+                </strong>
+                <small>
+                  {admin?.job_title || admin?.role || "School Admin"}
+                </small>
               </span>
               <b>⌄</b>
             </button>
             {profileOpen && (
               <div className="profile-dropdown" role="menu">
-                <div className="profile-dropdown-heading">Signed in as <strong>{admin?.role || "School Admin"}</strong></div>
-                <button type="button" className="profile-logout" onClick={logout} role="menuitem"><FiLogOut /> Log out</button>
+                <div className="profile-dropdown-heading">
+                  Signed in as <strong>{admin?.role || "School Admin"}</strong>
+                </div>
+                <button
+                  type="button"
+                  className="profile-logout"
+                  onClick={logout}
+                  role="menuitem"
+                >
+                  <FiLogOut /> Log out
+                </button>
               </div>
             )}
           </div>
@@ -213,7 +346,18 @@ export default function Dashboard() {
       <div className="portal-content">
         <section className="school-hero">
           <div className="school-identity">
-            {school?.logo ? <img className="school-logo-image" src={school.logo} alt={`${schoolName} logo`} /> : <div className="school-logo">{schoolName.slice(0, 3).toUpperCase()}<span>◆</span></div>}
+            {school?.logo ? (
+              <img
+                className="school-logo-image"
+                src={school.logo}
+                alt={`${schoolName} logo`}
+              />
+            ) : (
+              <div className="school-logo">
+                {schoolName.slice(0, 3).toUpperCase()}
+                <span>◆</span>
+              </div>
+            )}
             <div>
               <h1>
                 {schoolName} <em>{schoolStatus}</em>
@@ -225,7 +369,7 @@ export default function Dashboard() {
                 <span>⌕ {schoolPhone}</span>
                 <span>✉ {schoolEmail}</span>
                 <span>
-                  <FiUsers /> Student count unavailable
+                  <FiUsers /> {students.length} students
                 </span>
               </div>
             </div>
@@ -241,29 +385,29 @@ export default function Dashboard() {
           <MetricCard
             icon={<FiUsers />}
             label="Total Students"
-            value="—"
-            detail="Student data unavailable"
+            value={students.length}
+            detail="Students enrolled"
             tone="green"
           />
           <MetricCard
             icon={<FaBus />}
             label="Active Vehicles"
-            value="—"
-            detail="Vehicle data unavailable"
+            value={activeVehicles}
+            detail={`Vehicles assigned to active routes to ${schoolName}`}
             tone="blue"
           />
           <MetricCard
             icon={<FiUserCheck />}
             label="Active Drivers"
-            value="—"
-            detail="Driver data unavailable"
+            value={activeDrivers}
+            detail="Drivers assigned to active routes"
             tone="amber"
           />
           <MetricCard
             icon={<FiNavigation />}
             label="Active Routes"
-            value="—"
-            detail="Route data unavailable"
+            value={activeRoutes}
+            detail="Routes with active assignments"
             tone="purple"
           />
         </section>
@@ -271,21 +415,28 @@ export default function Dashboard() {
           <article className="dashboard-panel trips-panel">
             <PanelHeading title="Today's Trips" action="View all trips" />
             <div className="trip-list">
-              {trips.map(([name, time, students, duration], index) => (
-                <div className="trip-row" key={name}>
+              {trips.map((trip, index) => (
+                <div className="trip-row" key={trip.id}>
                   <div className={`van-thumb van-${index + 1}`}>
                     <FaBus />
                   </div>
                   <div className="trip-name">
-                    <strong>{name}</strong>
-                    <small>{time}</small>
+                    <strong>{trip.route_name || "Unnamed route"}</strong>
+                    <small>{formatRouteTime(trip.departure_time)}</small>
                   </div>
-                  <span className="on-trip">ON TRIP</span>
-                  <span>
-                    <FiUsers /> {students}
+                  <span className="on-trip">
+                    {trip.assignments?.some(
+                      (assignment) => assignment.is_active,
+                    )
+                      ? "ACTIVE"
+                      : "PLANNED"}
                   </span>
                   <span>
-                    <FiClock /> {duration}
+                    <FiUsers /> {trip.students || 0} students
+                  </span>
+                  <span>
+                    <FiClock />{" "}
+                    {trip.start_location || "Route locations pending"}
                   </span>
                   <b>›</b>
                 </div>
@@ -360,7 +511,11 @@ export default function Dashboard() {
               </div>
               <div>
                 <span>Established</span>
-                <strong>{school?.created_at ? new Date(school.created_at).getFullYear() : "—"}</strong>
+                <strong>
+                  {school?.created_at
+                    ? new Date(school.created_at).getFullYear()
+                    : "—"}
+                </strong>
               </div>
               <div>
                 <span>Grades</span>

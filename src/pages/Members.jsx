@@ -1,27 +1,36 @@
 import { useEffect, useState } from "react";
 import {
-  // FiAlertCircle,
-  FiEdit2,
   FiDownload,
   FiFileText,
-  FiMail,
-  FiMoreHorizontal,
-  FiPhone,
-  FiPlus,
   FiSearch,
   FiUser,
   FiUsers,
   FiX,
 } from "react-icons/fi";
-import { API_URL } from "../api";
+import { apiRequest } from "../api";
+import { supabaseClient } from "../supabaseClient";
 import "../styles/members.css";
+import {
+  downloadSchoolReport,
+  getCachedSchoolReportProfile,
+} from "../utils/schoolReport";
 
 const roles = [
+  ["super_admin", "Super administrator"],
   ["principal", "Principal"],
-  ["deputy_principal", "Deputy principal"],
-  ["teacher", "Teacher"],
+  ["vice_principal", "Vice principal"],
   ["administrator", "Administrator"],
   ["transport_coordinator", "Transport coordinator"],
+  ["transport_manager", "Transport manager"],
+  ["school_secretary", "School secretary"],
+  ["teacher", "Teacher"],
+  ["class_teacher", "Class teacher"],
+  ["grade_head", "Grade head"],
+  ["receptionist", "Receptionist"],
+  ["parent_coordinator", "Parent coordinator"],
+  ["safety_officer", "Safety officer"],
+  ["security", "Security"],
+  ["staff", "Staff"],
 ];
 
 const getAuth = () => {
@@ -32,38 +41,291 @@ const getAuth = () => {
   }
 };
 
-export default function Members() {
-  const [members, setMembers] = useState([]);
-  const [formOpen, setFormOpen] = useState(false);
+const getMembersCacheKey = (auth) => {
+  const fallbackId = auth.user?.id || "current";
+
+  try {
+    const profileKey = `schoolProfileCache:${fallbackId}`;
+    const schoolId =
+      auth.user?.school_id ||
+      auth.school_id ||
+      JSON.parse(localStorage.getItem(profileKey) || "null")?.data?.id;
+
+    return `schoolMembersCache:${schoolId || fallbackId}`;
+  } catch {
+    return `schoolMembersCache:${fallbackId}`;
+  }
+};
+
+const readCachedMembers = (cacheKey) => {
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+    return Array.isArray(cached) ? cached : [];
+  } catch {
+    return [];
+  }
+};
+
+export default function Members({
+  formOpen: controlledFormOpen,
+  setFormOpen: setControlledFormOpen,
+}) {
+  const auth = getAuth();
+  const token = auth.token;
+  const membersCacheKey = getMembersCacheKey(auth);
+  const [members, setMembers] = useState(() =>
+    readCachedMembers(membersCacheKey),
+  );
+
+  const isFormControlled = controlledFormOpen !== undefined;
+  const [internalFormOpen, setInternalFormOpen] = useState(false);
+  const formOpen = isFormControlled ? controlledFormOpen : internalFormOpen;
+  const updateFormOpen = (open) => {
+    if (isFormControlled) {
+      setControlledFormOpen?.(open);
+    } else {
+      setInternalFormOpen(open);
+    }
+  };
+
   const [form, setForm] = useState({
-    name: "",
-    email: "",
+    first_name: "",
+    last_name: "",
+    your_email: "",
     phone: "",
+    job_title: "",
     member_role: "teacher",
+    access_level: "read_only",
+    is_active: true,
   });
-  const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
-  const token = getAuth().token;
+  const [message, setMessage] = useState("");
+
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const getMemberName = (member) =>
+    member.users?.name ||
+    [member.first_name, member.last_name].filter(Boolean).join(" ") ||
+    "Staff member";
+
+  const getMemberDepartment = (member) => {
+    const role = String(member.member_role || "").toLowerCase();
+    const department = String(member.department || "").toLowerCase();
+
+    if (
+      department.includes("transport") ||
+      role.includes("driver") ||
+      role.includes("transport")
+    ) {
+      return "Transport";
+    }
+    if (
+      department.includes("academic") ||
+      department.includes("teach") ||
+      role === "teacher"
+    ) {
+      return "Academic";
+    }
+    if (
+      department.includes("admin") ||
+      [
+        "super_admin",
+        "administrator",
+        "principal",
+        "vice_principal",
+        "deputy_principal",
+      ].includes(role)
+    ) {
+      return "Administration";
+    }
+    return member.department || "Other";
+  };
+
+  const getMemberStatus = (member) =>
+    member.is_active === false ||
+    String(member.status).toLowerCase() === "inactive"
+      ? "Inactive"
+      : "Active";
+
+  const filteredMembers = members.filter((member) => {
+    const role = member.member_role || "";
+    const name = getMemberName(member);
+    const email = member.users?.email || member.email || "";
+    const phone = member.phone || "";
+    const searchText = `${name} ${email} ${phone}`.toLowerCase();
+
+    return (
+      (!search || searchText.includes(search.trim().toLowerCase())) &&
+      (!roleFilter || role === roleFilter) &&
+      (!departmentFilter || getMemberDepartment(member) === departmentFilter) &&
+      (!statusFilter || getMemberStatus(member) === statusFilter)
+    );
+  });
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5;
+  const totalPages = Math.max(1, Math.ceil(filteredMembers.length / pageSize));
+  const activePage = Math.min(currentPage, totalPages);
+  const pageMembers = filteredMembers.slice(
+    (activePage - 1) * pageSize,
+    activePage * pageSize,
+  );
+
+  // useEffect(() => {
+  //   setCurrentPage(1);
+  // }, [search, roleFilter, departmentFilter, statusFilter]);
+
+  const clearFilters = () => {
+    setSearch("");
+    setRoleFilter("");
+    setDepartmentFilter("");
+    setStatusFilter("");
+  };
+
+  const exportMembers = async () => {
+    const school = getCachedSchoolReportProfile();
+    const exportRecords = filteredMembers.map((member) => ({
+      name: getMemberName(member),
+      role:
+        roles.find(([value]) => value === member.member_role)?.[1] ||
+        member.member_role ||
+        "Teacher",
+      department: getMemberDepartment(member),
+      email: member.users?.email || member.email || "—",
+      phone: member.phone || "—",
+      status: getMemberStatus(member),
+    }));
+
+    try {
+      await downloadSchoolReport({
+        records: exportRecords,
+        columns: [
+          { key: "name", title: "Staff member", width: 2.2, emphasize: true },
+          { key: "role", title: "Role", width: 1.5 },
+          { key: "department", title: "Department", width: 1.4 },
+          { key: "email", title: "Email", width: 2.4 },
+          { key: "phone", title: "Phone", width: 1.5 },
+          { key: "status", title: "Status", width: 1.2, type: "status" },
+        ],
+        title: "Staff members",
+        schoolName: school.name || "School report",
+        fileName: "school-members.pdf",
+        subject: "School staff members",
+        metadata: [{ label: "Staff members", value: exportRecords.length }],
+      });
+    } catch (error) {
+      setMessage(error.message || "Could not export staff members.");
+    }
+  };
+
+  useEffect(() => {
+    if (!message) return undefined;
+    const timeoutId = window.setTimeout(() => setMessage(""), 5000);
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
 
   const loadMembers = async () => {
-    const response = await fetch(`${API_URL}/school/members`, {
+    const data = await apiRequest("/school/members", {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (response.ok) setMembers(await response.json());
+    setMembers(Array.isArray(data) ? data : []);
+  };
+
+  const updateMemberStatus = async (member, isActive) => {
+    const previousStatus = member.status;
+    const previousIsActive = member.is_active;
+
+    setMembers((current) =>
+      current.map((item) =>
+        item.id === member.id
+          ? {
+              ...item,
+              is_active: isActive,
+              status: isActive ? "active" : "inactive",
+            }
+          : item,
+      ),
+    );
+    setMessage("");
+    try {
+      const data = await apiRequest(`/school/members/${member.id}/status`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ is_active: isActive }),
+      });
+      setMessage(data.message || "Member status updated.");
+    } catch (error) {
+      setMembers((current) =>
+        current.map((item) =>
+          item.id === member.id
+            ? { ...item, is_active: previousIsActive, status: previousStatus }
+            : item,
+        ),
+      );
+      setMessage(error.message);
+    }
   };
 
   useEffect(() => {
     let mounted = true;
-    fetch(`${API_URL}/school/members`, {
+    apiRequest("/school/members", {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((response) => (response.ok ? response.json() : []))
+      .then((data) => (Array.isArray(data) ? data : []))
       .then((data) => {
         if (mounted) setMembers(data);
+      })
+      .catch((error) => {
+        if (mounted) setMessage(error.message);
       });
 
     return () => {
       mounted = false;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!supabaseClient) return undefined;
+
+    const schoolId = (() => {
+      try {
+        const auth = JSON.parse(localStorage.getItem("schoolAuth") || "{}");
+        const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
+        return JSON.parse(localStorage.getItem(cacheKey) || "null")?.data?.id;
+      } catch {
+        return "";
+      }
+    })();
+
+    if (!schoolId) return undefined;
+
+    const channel = supabaseClient
+      .channel(`school-members:${schoolId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "school_admins",
+          filter: `school_id=eq.${schoolId}`,
+        },
+        () => {
+          apiRequest("/school/members", {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+            .then((data) => {
+              if (Array.isArray(data)) setMembers(data);
+            })
+            .catch(() => undefined);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
     };
   }, [token]);
 
@@ -72,19 +334,23 @@ export default function Members() {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`${API_URL}/school/members`, {
+      await apiRequest("/school/members", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: JSON.stringify(form),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Unable to add member");
       setMessage("Member added. Temporary login details were sent by email.");
-      setForm({ name: "", email: "", phone: "", member_role: "teacher" });
-      setFormOpen(false);
+      setForm({
+        first_name: "",
+        last_name: "",
+        your_email: "",
+        phone: "",
+        job_title: "",
+        member_role: "teacher",
+        access_level: "read_only",
+        is_active: true,
+      });
+      updateFormOpen(false);
       await loadMembers();
     } catch (error) {
       setMessage(error.message);
@@ -93,43 +359,31 @@ export default function Members() {
     }
   };
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(membersCacheKey, JSON.stringify(members));
+    } catch {
+      // Continue normally if browser storage is unavailable or full.
+    }
+  }, [members, membersCacheKey]);
+
   return (
     <>
-      {/* <header className="portal-topbar">
-        <div className="portal-breadcrumb">
-          <span>Schools</span>
-          <b>›</b>
-          <strong>Staff Members</strong>
-        </div>
-        <div className="portal-top-actions">
-          <label className="portal-search">
-            <FiSearch />
-            <input placeholder="Search students, parents, routes..." />
-          </label>
-          <button className="icon-button" aria-label="Notifications">
-            <FiAlertCircle />
-            <b>5</b>
-          </button>
-          <div className="top-profile">
-            <img src="https://i.pravatar.cc/100?img=5" alt="School admin" />
-            <span>
-              <strong>School Admin</strong>
-              <small>Administrator</small>
-            </span>
-            <b>⌄</b>
-          </div>
-        </div>
-      </header> */}
       <div className="portal-content members-content">
         <section className="members-heading">
           <div>
-            <p className="page-kicker">SCHOOL TEAM</p>
+            <p className="page-kicker">SCHOOL ADMINISTRATION</p>
             <h1>Staff Members</h1>
-            <p>Manage school staff, their roles and contact information.</p>
+            <p>Manage school users, roles and contact information.</p>
           </div>
-          <button className="member-primary" onClick={() => setFormOpen(true)}>
-            <FiPlus /> Add staff member
-          </button>
+          {!isFormControlled && (
+            <button
+              className="member-primary"
+              onClick={() => updateFormOpen(true)}
+            >
+              <FiUsers /> Add staff member
+            </button>
+          )}
         </section>
         {message && <div className="member-message">{message}</div>}
         <section className="member-metrics">
@@ -138,9 +392,9 @@ export default function Members() {
               <FiUsers />
             </span>
             <div>
-              <small>Total staff</small>
-              <strong>{members.length || 28}</strong>
-              <em>All staff members</em>
+              <small>Total users</small>
+              <strong>{members.length}</strong>
+              <em>All school users</em>
             </div>
           </article>
           <article>
@@ -148,12 +402,21 @@ export default function Members() {
               <FiUser />
             </span>
             <div>
-              <small>Active staff</small>
+              <small>Administrators</small>
               <strong>
-                {members.filter((member) => member.status !== "inactive")
-                  .length || 25}
+                {
+                  members.filter((member) =>
+                    [
+                      "super_admin",
+                      "administrator",
+                      "principal",
+                      "vice_principal",
+                      "deputy_principal",
+                    ].includes(member.member_role),
+                  ).length
+                }
               </strong>
-              <em>Currently active</em>
+              <em>Full access users</em>
             </div>
           </article>
           <article>
@@ -163,8 +426,10 @@ export default function Members() {
             <div>
               <small>Teachers</small>
               <strong>
-                {members.filter((member) => member.member_role === "teacher")
-                  .length || 16}
+                {
+                  members.filter((member) => member.member_role === "teacher")
+                    .length
+                }
               </strong>
               <em>Teaching staff</em>
             </div>
@@ -174,9 +439,19 @@ export default function Members() {
               <FiFileText />
             </span>
             <div>
-              <small>Non-teaching</small>
-              <strong>9</strong>
-              <em>Support staff</em>
+              <small>Drivers</small>
+              <strong>
+                {
+                  members.filter((member) =>
+                    [
+                      "driver",
+                      "transport_coordinator",
+                      "transport_manager",
+                    ].includes(member.member_role),
+                  ).length
+                }
+              </strong>
+              <em>Transport staff</em>
             </div>
           </article>
           <article>
@@ -184,9 +459,26 @@ export default function Members() {
               <FiUser />
             </span>
             <div>
-              <small>Inactive</small>
-              <strong>3</strong>
-              <em>Not active</em>
+              <small>Other staff</small>
+              <strong>
+                {
+                  members.filter(
+                    (member) =>
+                      ![
+                        "super_admin",
+                        "teacher",
+                        "driver",
+                        "transport_coordinator",
+                        "transport_manager",
+                        "administrator",
+                        "principal",
+                        "vice_principal",
+                        "deputy_principal",
+                      ].includes(member.member_role),
+                  ).length
+                }
+              </strong>
+              <em>Non-teaching staff</em>
             </div>
           </article>
         </section>
@@ -194,27 +486,48 @@ export default function Members() {
           <div className="members-toolbar">
             <label className="members-search">
               <FiSearch />
-              <input placeholder="Search staff by name, email or phone..." />
+              <input
+                placeholder="Search staff by name, email or phone..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
             </label>
-            <select aria-label="Filter by role">
-              <option>Role: All</option>
-              <option>Principal</option>
-              <option>Teacher</option>
-              <option>Administrator</option>
+            <select
+              aria-label="Filter by role"
+              value={roleFilter}
+              onChange={(event) => setRoleFilter(event.target.value)}
+            >
+              <option value="">Role: All</option>
+              {roles.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
-            <select aria-label="Filter by department">
-              <option>Department: All</option>
-              <option>Administration</option>
-              <option>Academic</option>
-              <option>Transport</option>
+            <select
+              aria-label="Filter by department"
+              value={departmentFilter}
+              onChange={(event) => setDepartmentFilter(event.target.value)}
+            >
+              <option value="">Department: All</option>
+              <option value="Administration">Administration</option>
+              <option value="Academic">Academic</option>
+              <option value="Transport">Transport</option>
+              <option value="Other">Other</option>
             </select>
-            <select aria-label="Filter by status">
-              <option>Status: All</option>
-              <option>Active</option>
-              <option>Inactive</option>
+            <select
+              aria-label="Filter by status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
+              <option value="">Status: All</option>
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
             </select>
-            <button className="member-clear">Clear</button>
-            <button className="member-export">
+            <button className="member-clear" onClick={clearFilters}>
+              Clear
+            </button>
+            <button className="member-export" onClick={exportMembers}>
               <FiDownload /> Export
             </button>
           </div>
@@ -227,81 +540,41 @@ export default function Members() {
                   <th>Department</th>
                   <th>Contact</th>
                   <th>Status</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {members.map((member, index) => {
-                  const name =
-                    member.users?.name ||
-                    [
-                      "Linda Dlamini",
-                      "James Nkosi",
-                      "Nomsa Mthembu",
-                      "Sipho Dube",
-                      "Thandi Khumalo",
-                      "Patrick Mahlangu",
-                      "Bongani Mokoena",
-                    ][index] ||
-                    "Staff member";
-                  const email =
-                    member.users?.email ||
-                    `${name.toLowerCase().replaceAll(" ", ".")}@abcprimary.co.za`;
+                {pageMembers.map((member) => {
                   const role =
                     roles.find(
                       ([value]) => value === member.member_role,
                     )?.[1] ||
                     member.member_role ||
                     "Teacher";
+                  const status = getMemberStatus(member);
+                  const email =
+                    member.users?.email || member.email || "No email address";
+
                   return (
-                    <tr key={member.id || name}>
+                    <tr key={member.id}>
                       <td>
-                        <div className="member-name">
-                          <span>
-                            <FiUser />
-                          </span>
-                          <div>
-                            <strong>{name}</strong>
-                            <small>
-                              EMP-{String(index + 1).padStart(4, "0")}
-                            </small>
-                          </div>
-                        </div>
+                        <strong>{getMemberName(member)}</strong>
+                        <small>{email}</small>
                       </td>
                       <td>{role}</td>
-                      <td>
-                        {role.toLowerCase().includes("teacher")
-                          ? "Academic"
-                          : "Administration"}
-                      </td>
-                      <td>
-                        <small>
-                          <FiMail /> {email}
-                        </small>
-                        <small>
-                          <FiPhone /> {member.phone || "082 123 4567"}
-                        </small>
-                      </td>
-                      <td>
-                        <span
-                          className={`member-status ${member.status === "inactive" ? "inactive" : "active"}`}
-                        >
-                          <i />
-                          {member.status === "inactive" ? "Inactive" : "Active"}
-                        </span>
-                      </td>
+                      <td>{getMemberDepartment(member)}</td>
+                      <td>{member.phone || "—"}</td>
                       <td>
                         <button
-                          className="member-action"
-                          aria-label={`Edit ${name}`}
+                          type="button"
+                          className="member-status-toggle"
+                          role="switch"
+                          aria-checked={status === "Active"}
+                          aria-label={`${status === "Active" ? "Deactivate" : "Activate"} ${getMemberName(member)}`}
+                          onClick={() =>
+                            updateMemberStatus(member, status !== "Active")
+                          }
                         >
-                          <FiEdit2 />
-                        </button>
-                        <button
-                          className="member-action"
-                          aria-label={`More options for ${name}`}
-                        >
-                          <FiMoreHorizontal />
+                          <span className="member-status-toggle-thumb" />
                         </button>
                       </td>
                     </tr>
@@ -309,19 +582,47 @@ export default function Members() {
                 })}
               </tbody>
             </table>
-            {!members.length && (
-              <div className="member-empty">No staff members added yet.</div>
+            {!filteredMembers.length && (
+              <div className="member-empty">No matching staff members.</div>
             )}
           </div>
           <div className="members-footer">
-            <span>Showing 1 to {members.length || 7} of 28 staff members</span>
+            <span>
+              Showing{" "}
+              {filteredMembers.length
+                ? `${(activePage - 1) * pageSize + 1} to ${Math.min(activePage * pageSize, filteredMembers.length)}`
+                : "0"}{" "}
+              of {filteredMembers.length} staff members
+            </span>
             <div>
-              <button disabled>‹</button>
-              <button className="current-page">1</button>
-              <button>2</button>
-              <button>3</button>
-              <button>4</button>
-              <button>›</button>
+              <button
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={currentPage === 1}
+                aria-label="Previous page"
+              >
+                ‹
+              </button>
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+                (page) => (
+                  <button
+                    key={page}
+                    className={page === currentPage ? "current-page" : ""}
+                    onClick={() => setCurrentPage(page)}
+                    aria-current={page === currentPage ? "page" : undefined}
+                  >
+                    {page}
+                  </button>
+                ),
+              )}
+              <button
+                onClick={() =>
+                  setCurrentPage((page) => Math.min(totalPages, page + 1))
+                }
+                disabled={currentPage === totalPages}
+                aria-label="Next page"
+              >
+                ›
+              </button>
             </div>
           </div>
         </section>
@@ -332,7 +633,7 @@ export default function Members() {
                 <h2>Add school member</h2>
                 <button
                   type="button"
-                  onClick={() => setFormOpen(false)}
+                  onClick={() => updateFormOpen(false)}
                   aria-label="Close"
                 >
                   <FiX />
@@ -340,26 +641,43 @@ export default function Members() {
               </div>
               <input
                 required
-                placeholder="Full name"
-                value={form.name}
+                placeholder="First name"
+                value={form.first_name}
                 onChange={(event) =>
-                  setForm({ ...form, name: event.target.value })
+                  setForm({ ...form, first_name: event.target.value })
+                }
+              />
+              <input
+                required
+                placeholder="Last name"
+                value={form.last_name}
+                onChange={(event) =>
+                  setForm({ ...form, last_name: event.target.value })
                 }
               />
               <input
                 required
                 type="email"
                 placeholder="Email address"
-                value={form.email}
+                value={form.your_email}
                 onChange={(event) =>
-                  setForm({ ...form, email: event.target.value })
+                  setForm({ ...form, your_email: event.target.value })
                 }
               />
               <input
+                required
                 placeholder="Phone number"
                 value={form.phone}
                 onChange={(event) =>
                   setForm({ ...form, phone: event.target.value })
+                }
+              />
+              <input
+                required
+                placeholder="Job title"
+                value={form.job_title}
+                onChange={(event) =>
+                  setForm({ ...form, job_title: event.target.value })
                 }
               />
               <select
@@ -374,6 +692,29 @@ export default function Members() {
                   </option>
                 ))}
               </select>
+              <select
+                value={form.access_level}
+                onChange={(event) =>
+                  setForm({ ...form, access_level: event.target.value })
+                }
+              >
+                <option value="full">Full access</option>
+                <option value="management">Management</option>
+                <option value="transport">Transport</option>
+                <option value="academic">Academic</option>
+                <option value="support">Support</option>
+                <option value="read_only">Read only</option>
+              </select>
+              <label className="member-active-field">
+                <input
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={(event) =>
+                    setForm({ ...form, is_active: event.target.checked })
+                  }
+                />
+                Active member
+              </label>
               <button disabled={saving} className="member-submit">
                 {saving ? "Adding..." : "Add member"}
               </button>

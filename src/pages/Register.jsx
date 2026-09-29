@@ -4,6 +4,8 @@ import {
   FiArrowRight,
   FiBriefcase,
   FiCheck,
+  FiEye,
+  FiEyeOff,
   FiLock,
   FiMail,
   FiUser,
@@ -34,6 +36,8 @@ export default function Register() {
   const [schoolSearch, setSchoolSearch] = useState("");
   const [selectedSchool, setSelectedSchool] = useState(null);
   const [locationLocked, setLocationLocked] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     apiRequest("/schools")
@@ -253,7 +257,7 @@ export default function Register() {
                 value={form.email}
                 onChange={update("email")}
                 required
-                placeholder="school@example.com"
+                placeholder="user@example.com"
               />
             </span>
           </label>
@@ -291,13 +295,21 @@ export default function Register() {
               <span className="input-wrap">
                 <FiLock />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={update("password")}
                   required
                   minLength={6}
                   placeholder="At least 6 characters"
                 />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <FiEyeOff /> : <FiEye />}
+                </button>
               </span>
             </label>
             <label>
@@ -305,12 +317,24 @@ export default function Register() {
               <span className="input-wrap">
                 <FiLock />
                 <input
-                  type="password"
+                  type={showConfirmPassword ? "text" : "password"}
                   value={form.confirmPassword}
                   onChange={update("confirmPassword")}
                   required
                   placeholder="Repeat password"
                 />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setShowConfirmPassword((visible) => !visible)}
+                  aria-label={
+                    showConfirmPassword
+                      ? "Hide confirmed password"
+                      : "Show confirmed password"
+                  }
+                >
+                  {showConfirmPassword ? <FiEyeOff /> : <FiEye />}
+                </button>
               </span>
             </label>
           </div>

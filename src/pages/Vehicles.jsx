@@ -3,109 +3,69 @@ import {
   FiAlertTriangle,
   FiArrowDown,
   FiArrowUp,
-  FiEdit2,
+  // FiEdit2,
   FiDownload,
-  FiMoreHorizontal,
+  // FiMoreHorizontal,
   FiPlus,
   FiSearch,
   FiTool,
   FiTruck,
   FiUsers,
+  FiPlay,
+  FiStopCircle,
 } from "react-icons/fi";
 import { FaBus } from "react-icons/fa";
 import "../styles/vehicles.css";
-
-const vehicles = [
-  {
-    name: "Toyota Quantum",
-    id: "VEH001",
-    registration: "GP 45 CD GP",
-    model: "Toyota Quantum 2021",
-    capacity: 16,
-    occupied: 12,
-    driver: "John Mokoena",
-    route: "Route 5",
-    status: "Active",
-    service: "12 May 2026",
-    nextService: "12 Aug 2026",
-  },
-  {
-    name: "Toyota Quantum",
-    id: "VEH002",
-    registration: "GP 78 EF GP",
-    model: "Toyota Quantum 2020",
-    capacity: 16,
-    occupied: 14,
-    driver: "Sarah Jacobs",
-    route: "Route 8",
-    status: "Active",
-    service: "08 May 2026",
-    nextService: "08 Aug 2026",
-  },
-  {
-    name: "Toyota Quantum",
-    id: "VEH003",
-    registration: "GP 12 AB GP",
-    model: "Toyota Quantum 2022",
-    capacity: 16,
-    occupied: 10,
-    driver: "Michael Williams",
-    route: "Route 1",
-    status: "Active",
-    service: "15 May 2026",
-    nextService: "15 Aug 2026",
-  },
-  {
-    name: "Isuzu Bus",
-    id: "VEH004",
-    registration: "GP 91 GH GP",
-    model: "Isuzu NQR 500 2019",
-    capacity: 32,
-    occupied: 25,
-    driver: "Thabo Nkosi",
-    route: "Route 12",
-    status: "Active",
-    service: "20 Apr 2026",
-    nextService: "20 Jul 2026",
-  },
-  {
-    name: "Toyota Quantum",
-    id: "VEH005",
-    registration: "GP 63 IJ GP",
-    model: "Toyota Quantum 2021",
-    capacity: 16,
-    occupied: 0,
-    driver: "James Dlamini",
-    route: "Route 14",
-    status: "Maintenance",
-    service: "18 May 2026",
-    nextService: "18 Jul 2026",
-  },
-  {
-    name: "Toyota Quantum",
-    id: "VEH006",
-    registration: "GP 27 KL GP",
-    model: "Toyota Quantum 2018",
-    capacity: 16,
-    occupied: 0,
-    driver: "Not assigned",
-    route: "Not assigned",
-    status: "Out of Service",
-    service: "10 Mar 2026",
-    nextService: "-",
-  },
-];
 
 const tabs = ["All Vehicles", "Active", "Under Maintenance", "Out of Service"];
 
 function Vehicles() {
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All Vehicles");
+
+  const auth = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("schoolAuth") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const cacheKey = `schoolTrackingCache:${auth.user?.id || "current"}`;
+
+  const [vehiclesIformation] = useState(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      return cached?.data?.trips || null;
+    } catch {
+      return null;
+    }
+  });
+  const getVehicles = vehiclesIformation.map((v) => v.vehicle);
+  const getVehicleCount = vehiclesIformation.length;
+  const getTotalActiveVehicles = vehiclesIformation.filter(
+    (v) => v.vehicle.status === "active",
+  ).length;
+
+  console.log({ getTotalActiveVehicles });
+
+  const mappedVehicles = vehiclesIformation.map((route) => {
+    const vehicleDetails = getVehicles.find(
+      (vehicle) => vehicle.id === route.vehicle.id,
+    );
+    return {
+      ...route,
+      vehicle: {
+        ...route.vehicle,
+        ...vehicleDetails,
+      },
+    };
+  });
+
   const filteredVehicles = useMemo(
     () =>
-      vehicles.filter((vehicle) => {
+      mappedVehicles.filter((vehicle) => {
         const matchesQuery =
-          `${vehicle.name} ${vehicle.id} ${vehicle.registration} ${vehicle.driver}`
+          `${vehicle.name} ${vehicle.id} ${vehicle.license_plate} ${vehicle.driver}`
             .toLowerCase()
             .includes(query.toLowerCase());
         const matchesTab =
@@ -170,7 +130,7 @@ function Vehicles() {
             </span>
             <div>
               <small>Total vehicles</small>
-              <strong>14</strong>
+              <strong>{getVehicleCount}</strong>
               <em>
                 <FiArrowUp /> 2 this month
               </em>
@@ -182,7 +142,7 @@ function Vehicles() {
             </span>
             <div>
               <small>Active vehicles</small>
-              <strong>12</strong>
+              <strong>{getTotalActiveVehicles}</strong>
               <em className="neutral">85.7%</em>
             </div>
           </article>
@@ -253,13 +213,13 @@ function Vehicles() {
                   <th>
                     Vehicle <FiArrowDown />
                   </th>
-                  <th>Registration No.</th>
                   <th>Type / Model</th>
+                  <th>Registration No.</th>
                   <th>Capacity</th>
                   <th>Driver</th>
                   <th>Route</th>
                   <th>Status</th>
-                  <th>Last service</th>
+                  <th>Start/End Location</th>
                   <th aria-label="Actions" />
                 </tr>
               </thead>
@@ -269,52 +229,70 @@ function Vehicles() {
                     <td>
                       <div className="vehicle-name">
                         <span className="vehicle-thumb">
+                          {/* {vehicle.vehicle.vehicle_images ? */}
+                          //
                           <FaBus />
+                          //
                         </span>
                         <div>
-                          <strong>{vehicle.name}</strong>
-                          <small>ID: {vehicle.id}</small>
+                          <strong>{vehicle.vehicle.name}</strong>
+                          <small>ID: {vehicle.vehicle.id.slice(0, 8)}</small>
                         </div>
                       </div>
                     </td>
-                    <td>{vehicle.registration}</td>
-                    <td>{vehicle.model}</td>
+                    <td>{vehicle.vehicle.model}</td>
+                    <td>{vehicle.vehicle.license_plate}</td>
                     <td>
                       {vehicle.capacity} Seats
                       <small
                         className={vehicle.occupied ? "occupied" : "available"}
                       >
-                        {vehicle.occupied} Occupied
+                        {vehicle.occupied} Occupied {vehicle.students}
                       </small>
                     </td>
                     <td>
-                      <strong>{vehicle.driver}</strong>
-                      <small>
-                        {vehicle.driver === "Not assigned"
+                      <strong>{vehicle.driver.users.name}</strong>
+                      <small style={{ color: "orange" }}>
+                        {vehicle.driver.status === "inactive"
                           ? "Not Assigned"
                           : "★ 4.8"}
                       </small>
                     </td>
                     <td>
                       <span className="route-dot" />
-                      {vehicle.route}
+                      {vehicle.route_name}
                       <small>
-                        {vehicle.route === "Not assigned"
+                        {!vehicle.route_id
                           ? "Not Assigned"
                           : "Morning / Afternoon"}
                       </small>
                     </td>
                     <td>
                       <span
-                        className={`vehicle-status ${vehicle.status.toLowerCase().replaceAll(" ", "-")}`}
+                        className={`vehicle-status ${vehicle.vehicle.status.toLowerCase().replaceAll(" ", "-")}`}
                       >
-                        {vehicle.status}
+                        {vehicle.vehicle.status}
                       </span>
                     </td>
                     <td>
-                      <strong>{vehicle.service}</strong>
-                      <small>Next: {vehicle.nextService}</small>
+                      <strong
+                        style={{
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        Start: <FiPlay color="green" /> {vehicle.start_location}
+                      </strong>
+                      <strong
+                        style={{
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        End: <FiStopCircle color="red" /> {vehicle.end_location}
+                      </strong>
                     </td>
+                    {/* 
                     <td>
                       <button
                         className="vehicle-row-action"
@@ -328,7 +306,7 @@ function Vehicles() {
                       >
                         <FiMoreHorizontal />
                       </button>
-                    </td>
+                    </td> */}
                   </tr>
                 ))}
               </tbody>
@@ -357,6 +335,7 @@ function Vehicles() {
             </label>
           </div>
         </section>
+        {JSON.stringify(filteredVehicles)}
       </div>
     </>
   );
