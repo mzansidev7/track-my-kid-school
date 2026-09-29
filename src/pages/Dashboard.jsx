@@ -101,6 +101,8 @@ export default function Dashboard() {
       return null;
     }
   });
+  const [schoolTrips, setSchoolTrips] = useState([]);
+  const [schoolTripsLoading, setSchoolTripsLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -163,6 +165,29 @@ export default function Dashboard() {
       active = false;
     };
   }, [auth.token, dashboardCacheKey]);
+
+  useEffect(() => {
+    let active = true;
+    const loadSchoolTrips = async () => {
+      try {
+        const data = await apiRequest("/school/trips", {
+          headers: { Authorization: `Bearer ${auth.token || ""}` },
+        });
+        if (active) setSchoolTrips(Array.isArray(data) ? data : []);
+      } catch {
+        // Keep trip monitoring available even if the trip endpoint is offline.
+      } finally {
+        if (active) setSchoolTripsLoading(false);
+      }
+    };
+    const timeout = window.setTimeout(() => void loadSchoolTrips(), 0);
+    const interval = window.setInterval(loadSchoolTrips, 30000);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, [auth.token]);
 
   useEffect(() => {
     const schoolId = dashboard?.school?.id || school?.id;
@@ -472,6 +497,43 @@ export default function Dashboard() {
                 time="2 days ago"
               />
             </div>
+          </article>
+        </section>
+        <section className="dashboard-grid school-trip-dashboard-grid">
+          <article className="dashboard-panel school-trip-dashboard-panel">
+            <PanelHeading title="School-organized trips" action="Manage trips" />
+            {schoolTripsLoading ? (
+              <p className="school-trip-dashboard-empty">Loading school trips…</p>
+            ) : schoolTrips.length ? (
+              <div className="school-trip-dashboard-list">
+                {schoolTrips.slice(0, 4).map((trip) => (
+                  <a
+                    className="school-trip-dashboard-row"
+                    href="/trips"
+                    key={trip.id}
+                  >
+                    <span className="school-trip-dashboard-icon"><FaBus /></span>
+                    <span className="school-trip-dashboard-copy">
+                      <strong>{trip.name}</strong>
+                      <small>
+                        {trip.destination} · {new Date(trip.departure_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                      </small>
+                      <small>
+                        {trip.registered_count || 0} learners · {(trip.vehicles || []).length} school vehicle{(trip.vehicles || []).length === 1 ? "" : "s"}
+                      </small>
+                    </span>
+                    <span className={`school-trip-dashboard-status status-${trip.status}`}>
+                      {trip.status.replaceAll("_", " ")}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="school-trip-dashboard-empty">
+                <p>No school-organized trips yet.</p>
+                <a href="/trips">Create your first trip <FiArrowRight /></a>
+              </div>
+            )}
           </article>
         </section>
         <section className="dashboard-grid bottom-grid">

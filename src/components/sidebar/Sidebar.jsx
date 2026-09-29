@@ -10,7 +10,7 @@ import {
   FiNavigation,
   FiSettings,
   FiTruck,
-  FiUserCheck,
+  // FiUserCheck,
   FiUserPlus,
   FiUsers,
 } from "react-icons/fi";
@@ -26,8 +26,8 @@ import "../../styles/sidebar.css";
 const menuItems = [
   { title: "Dashboard ✓", icon: <FiHome />, path: "/dashboard" },
   { title: "Students ✓", icon: <FiUsers />, path: "/students" },
-  { title: "Drivers", icon: <FiUserCheck />, path: "/drivers" },
-  { title: "Vehicles", icon: <FaBus />, path: "/vehicles" },
+  // { title: "Drivers", icon: <FiUserCheck />, path: "/drivers" },
+  // { title: "Vehicles", icon: <FaBus />, path: "/vehicles" },
   { title: "Routes", icon: <FiMap />, path: "/routes" },
   { title: "Trips", icon: <FiTruck />, path: "/trips" },
   { title: "Live Tracking ✓✓", icon: <FiNavigation />, path: "/tracking" },

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertCircle,
   FiArrowUpRight,
   FiCalendar,
   FiCheckCircle,
-  FiClock,
   FiEdit2,
   FiMapPin,
   FiPlus,
@@ -14,8 +13,16 @@ import {
   FiX,
 } from "react-icons/fi";
 import { apiRequest } from "../api";
+import {
+  APIProvider,
+  AdvancedMarker,
+  Map as GoogleMap,
+  useMapsLibrary,
+} from "@vis.gl/react-google-maps";
 import { successMessage, showErrorAlert } from "../components/sweetAlert.js";
 import "../styles/trips.css";
+
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 const categories = [
   ["educational", "Educational"],
@@ -36,6 +43,30 @@ const statuses = [
   "completed",
   "cancelled",
 ];
+const tripStatusTransitions = {
+  draft: ["draft", "registration_open", "preparing", "cancelled"],
+  registration_open: [
+    "draft",
+    "registration_open",
+    "confirmed",
+    "preparing",
+    "cancelled",
+  ],
+  confirmed: ["draft", "confirmed", "preparing", "cancelled"],
+  preparing: ["draft", "preparing", "in_progress", "cancelled"],
+  in_progress: ["in_progress", "completed"],
+  completed: ["completed"],
+  cancelled: ["cancelled"],
+};
+const availableTripStatuses = (status, hasAssignedVehicle) => {
+  const validTransitions = tripStatusTransitions[status] || [status];
+  return hasAssignedVehicle
+    ? validTransitions
+    : validTransitions.filter(
+        (nextStatus) =>
+          nextStatus === status || ["draft", "preparing"].includes(nextStatus),
+      );
+};
 const pageSize = 6;
 const emptyTrip = {
   name: "",
@@ -103,6 +134,254 @@ const money = (trip) =>
   trip.is_free
     ? "Free"
     : `${trip.currency || "ZAR"} ${Number(trip.price || 0).toFixed(2)}`;
+const registrationState = (trip) => {
+  if (trip.status === "draft") return "Not published";
+  if (trip.status !== "registration_open") return "Closed";
+  if (
+    trip.registration_closes_at &&
+    new Date(trip.registration_closes_at).getTime() < Date.now()
+  )
+    return "Closed";
+  return "Open";
+};
+
+function TripPlaceNameField({
+  tripForm,
+  setTripForm,
+  onPlaceSelected,
+  onPlaceSearchChanged,
+}) {
+  const inputRef = useRef(null);
+  const placesLibrary = useMapsLibrary("places");
+
+  useEffect(() => {
+    if (!placesLibrary || !inputRef.current) return undefined;
+
+    const autocomplete = new placesLibrary.Autocomplete(inputRef.current, {
+      fields: ["name", "formatted_address", "geometry"],
+      componentRestrictions: { country: "za" },
+    });
+    const listener = autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+      const location = place.geometry?.location;
+      if (!location) return;
+
+      const name = place.name || place.formatted_address || "";
+      setTripForm((current) => ({
+        ...current,
+        name,
+        destination: name,
+        destination_address: place.formatted_address || name,
+        destination_latitude: location.lat(),
+        destination_longitude: location.lng(),
+      }));
+      onPlaceSelected();
+    });
+
+    return () => listener.remove();
+  }, [onPlaceSelected, placesLibrary, setTripForm]);
+
+  return (
+    <label>
+      Trip name
+      <input
+        ref={inputRef}
+        required
+        value={tripForm.name}
+        onChange={(event) => {
+          onPlaceSearchChanged();
+          setTripForm((current) => ({ ...current, name: event.target.value }));
+        }}
+        placeholder="Search for a trip destination"
+        autoComplete="off"
+      />
+      <small className="trip-field-hint">
+        Search Google Places and select a result to fill in the destination.
+      </small>
+    </label>
+  );
+}
+
+function TripPlaceNameInput({
+  tripForm,
+  setTripForm,
+  onPlaceSelected,
+  onPlaceSearchChanged,
+}) {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return (
+      <label>
+        Trip name
+        <input
+          required
+          value={tripForm.name}
+          onChange={(event) => {
+            onPlaceSearchChanged();
+            setTripForm((current) => ({
+              ...current,
+              name: event.target.value,
+            }));
+          }}
+          placeholder="Trip name"
+        />
+      </label>
+    );
+  }
+
+  return (
+    <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={["places"]}>
+      <TripPlaceNameField
+        tripForm={tripForm}
+        setTripForm={setTripForm}
+        onPlaceSelected={onPlaceSelected}
+        onPlaceSearchChanged={onPlaceSearchChanged}
+      />
+    </APIProvider>
+  );
+}
+
+function TripDestinationPicker({ tripForm, setTripForm, locked }) {
+  const latitude = Number(tripForm.destination_latitude);
+  const longitude = Number(tripForm.destination_longitude);
+  const selectedLocation =
+    tripForm.destination_latitude !== "" &&
+    tripForm.destination_longitude !== "" &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude)
+      ? { lat: latitude, lng: longitude }
+      : null;
+  const setLocation = async (coordinates) => {
+    if (locked) return;
+    setTripForm((current) => ({
+      ...current,
+      destination_latitude: coordinates.lat,
+      destination_longitude: coordinates.lng,
+    }));
+    try {
+      const response = await fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${coordinates.lat}&longitude=${coordinates.lng}&localityLanguage=en`,
+      );
+      const data = await response.json();
+      const address =
+        data.localityInfo?.administrative?.[2]?.name ||
+        data.city ||
+        data.locality ||
+        `${coordinates.lat.toFixed(6)}, ${coordinates.lng.toFixed(6)}`;
+      setTripForm((current) => ({
+        ...current,
+        destination_address: address,
+      }));
+    } catch {
+      // Keep the selected coordinates even if reverse geocoding is unavailable.
+    }
+  };
+
+  if (!GOOGLE_MAPS_API_KEY) return null;
+
+  return (
+    <div
+      className={`trip-form-full trip-destination-map-wrap${locked ? " is-locked" : ""}`}
+    >
+      <div className="trip-destination-map-heading">
+        <strong>{tripForm.destination || "Choose destination on map"}</strong>
+        <span>
+          {selectedLocation ? "Location selected" : "Select a map point"}
+        </span>
+      </div>
+      <div className="trip-destination-map">
+        <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={["places"]}>
+          <GoogleMap
+            center={selectedLocation || { lat: -25.7479, lng: 28.2293 }}
+            zoom={selectedLocation ? 14 : 6}
+            gestureHandling={locked ? "none" : "auto"}
+            keyboardShortcuts={!locked}
+            disableDefaultUI={locked}
+            mapId="school-trip-destination-map"
+            onClick={(event) => {
+              const location = event.detail?.latLng;
+              if (location && !locked) {
+                void setLocation({ lat: location.lat, lng: location.lng });
+              }
+            }}
+          >
+            {selectedLocation && (
+              <AdvancedMarker
+                position={selectedLocation}
+                title={tripForm.destination || "Trip destination"}
+              />
+            )}
+          </GoogleMap>
+        </APIProvider>
+      </div>
+      <small>
+        {locked
+          ? "Destination locked from the selected Google Places result. Change the trip name search to choose a different place."
+          : tripForm.destination_address ||
+            "Click the map to set the destination address and coordinates."}
+        {selectedLocation &&
+          ` · ${selectedLocation.lat.toFixed(6)}, ${selectedLocation.lng.toFixed(6)}`}
+      </small>
+    </div>
+  );
+}
+
+function TripLiveMap({ trip }) {
+  if (!GOOGLE_MAPS_API_KEY) return null;
+  const livePoints = (trip.vehicles || [])
+    .filter(
+      (assignment) =>
+        Number.isFinite(Number(assignment.tracking?.latitude)) &&
+        Number.isFinite(Number(assignment.tracking?.longitude)),
+    )
+    .map((assignment) => ({
+      id: assignment.id,
+      position: {
+        lat: Number(assignment.tracking.latitude),
+        lng: Number(assignment.tracking.longitude),
+      },
+      title: assignment.vehicle?.name || "School trip vehicle",
+    }));
+  const destination =
+    trip.destination_latitude != null && trip.destination_longitude != null
+      ? {
+          lat: Number(trip.destination_latitude),
+          lng: Number(trip.destination_longitude),
+        }
+      : null;
+  if (!livePoints.length && !destination) return null;
+  const center = livePoints[0]?.position || destination;
+
+  return (
+    <div className="trip-live-map-wrap">
+      <h3>Live vehicle locations</h3>
+      <div className="trip-live-map">
+        <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={["places"]}>
+          <GoogleMap
+            center={center}
+            defaultZoom={11}
+            mapId="school-trip-live-map"
+          >
+            {livePoints.map((point) => (
+              <AdvancedMarker
+                key={point.id}
+                position={point.position}
+                title={point.title}
+              />
+            ))}
+            {destination && (
+              <AdvancedMarker position={destination} title={trip.destination} />
+            )}
+          </GoogleMap>
+        </APIProvider>
+      </div>
+      {!livePoints.length && (
+        <p className="trip-live-map-note">
+          No current GPS location is available. Showing the destination only.
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function Trips() {
   const auth = getAuth();
@@ -120,17 +399,43 @@ export default function Trips() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [destinationFilter, setDestinationFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
+  const [vehicleFilter, setVehicleFilter] = useState("all");
+  const [staffFilter, setStaffFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState(null);
   const [editingTrip, setEditingTrip] = useState(null);
   const [tripForm, setTripForm] = useState(emptyTrip);
-  const [learnerQuery, setLearnerQuery] = useState("");
+  const [destinationLocked, setDestinationLocked] = useState(false);
+  const handlePlaceSelected = useCallback(() => {
+    setDestinationLocked(true);
+  }, []);
+  const handlePlaceSearchChanged = useCallback(() => {
+    if (!destinationLocked) return;
+    setDestinationLocked(false);
+    setTripForm((current) => ({
+      ...current,
+      destination: "",
+      destination_address: "",
+      destination_latitude: "",
+      destination_longitude: "",
+    }));
+  }, [destinationLocked]);
   const [gradeFilter, setGradeFilter] = useState("all");
   const [selectedLearners, setSelectedLearners] = useState({});
   const [learnerAssignments, setLearnerAssignments] = useState({});
+  const [learnerVehicleChoice, setLearnerVehicleChoice] = useState("");
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle);
+  const [editingVehicle, setEditingVehicle] = useState(null);
+  const [vehicleAssets, setVehicleAssets] = useState({
+    photos: [],
+    documents: [],
+  });
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [sharingAssignment, setSharingAssignment] = useState(null);
+  const [trackingError, setTrackingError] = useState("");
+  const locationWatchRef = useRef(null);
+  const trackingIntervalRef = useRef(null);
 
   const loadData = useCallback(async () => {
     setError("");
@@ -158,18 +463,40 @@ export default function Trips() {
   }, [auth.token]);
 
   useEffect(() => {
-    void loadData();
+    const timeout = window.setTimeout(() => void loadData(), 0);
+    return () => window.clearTimeout(timeout);
   }, [loadData]);
+
+  useEffect(() => {
+    if (!trips.some((trip) => trip.status === "in_progress")) {
+      return undefined;
+    }
+    const interval = window.setInterval(() => void loadData(), 10000);
+    return () => window.clearInterval(interval);
+  }, [loadData, trips]);
+
+  useEffect(
+    () => () => {
+      if (locationWatchRef.current !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(locationWatchRef.current);
+      }
+      if (trackingIntervalRef.current !== null) {
+        window.clearInterval(trackingIntervalRef.current);
+      }
+    },
+    [],
+  );
 
   const startTrip = (trip = null) => {
     setError("");
+    setDestinationLocked(false);
     setEditingTrip(trip);
-    setLearnerQuery("");
     setGradeFilter("all");
     if (!trip) {
       setTripForm(emptyTrip);
       setSelectedLearners({});
       setLearnerAssignments({});
+      setLearnerVehicleChoice("");
       setModal("trip");
       return;
     }
@@ -195,20 +522,15 @@ export default function Trips() {
     });
     setSelectedLearners(selected);
     setLearnerAssignments(learnerVehicles);
+    const existingVehicleIds = [
+      ...new Set(Object.values(learnerVehicles).filter(Boolean)),
+    ];
+    setLearnerVehicleChoice(
+      existingVehicleIds.length === 1 ? existingVehicleIds[0] : "",
+    );
     setModal("trip");
   };
 
-  const filteredLearners = useMemo(() => {
-    const needle = learnerQuery.trim().toLowerCase();
-    return resources.learners.filter((student) => {
-      const name =
-        `${student.name || ""} ${student.lastname || ""}`.toLowerCase();
-      return (
-        (!needle || name.includes(needle)) &&
-        (gradeFilter === "all" || student.grade === gradeFilter)
-      );
-    });
-  }, [gradeFilter, learnerQuery, resources.learners]);
   const grades = useMemo(
     () =>
       [
@@ -236,13 +558,34 @@ export default function Trips() {
           (!needle || searchable.includes(needle)) &&
           (statusFilter === "all" || trip.status === statusFilter) &&
           (typeFilter === "all" || trip.category === typeFilter) &&
+          (!dateFilter || trip.departure_at?.slice(0, 10) === dateFilter) &&
+          (vehicleFilter === "all" ||
+            (trip.vehicles || []).some(
+              (assignment) => assignment.vehicle_id === vehicleFilter,
+            )) &&
+          (staffFilter === "all" ||
+            (trip.vehicles || []).some(
+              (assignment) =>
+                assignment.driver_admin_id === staffFilter ||
+                assignment.coordinator_admin_id === staffFilter,
+            )) &&
           (!destinationFilter ||
             trip.destination
               .toLowerCase()
               .includes(destinationFilter.toLowerCase()))
         );
       }),
-    [activeTab, destinationFilter, query, statusFilter, trips, typeFilter],
+    [
+      activeTab,
+      dateFilter,
+      destinationFilter,
+      query,
+      staffFilter,
+      statusFilter,
+      trips,
+      typeFilter,
+      vehicleFilter,
+    ],
   );
   const totalPages = Math.max(1, Math.ceil(filteredTrips.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -251,6 +594,36 @@ export default function Trips() {
     currentPage * pageSize,
   );
   const selectedCount = Object.values(selectedLearners).filter(Boolean).length;
+  const selectLearnerGrade = (grade) => {
+    setGradeFilter(grade);
+    const selectedIds = resources.learners
+      .filter((student) => grade === "all" || student.grade === grade)
+      .map((student) => student.id);
+    setSelectedLearners(
+      Object.fromEntries(selectedIds.map((learnerId) => [learnerId, true])),
+    );
+    if (learnerVehicleChoice) {
+      setLearnerAssignments((current) => {
+        const next = { ...current };
+        selectedIds.forEach((learnerId) => {
+          next[learnerId] = learnerVehicleChoice;
+        });
+        return next;
+      });
+    }
+  };
+  const assignSelectedLearnersToVehicle = (vehicleId) => {
+    setLearnerVehicleChoice(vehicleId);
+    setLearnerAssignments((current) => {
+      const next = { ...current };
+      Object.keys(selectedLearners).forEach((learnerId) => {
+        if (!selectedLearners[learnerId]) return;
+        if (vehicleId) next[learnerId] = vehicleId;
+        else delete next[learnerId];
+      });
+      return next;
+    });
+  };
   const selectedVehicleIds = [
     ...new Set(
       Object.entries(learnerAssignments)
@@ -272,8 +645,29 @@ export default function Trips() {
   const submitTrip = async (event) => {
     event.preventDefault();
     setError("");
-    if (new Date(tripForm.return_at) < new Date(tripForm.departure_at)) {
+    if (!tripForm.departure_at || !tripForm.return_at) {
+      setError("Enter both the departure and return date and time.");
+      return;
+    }
+    const departureTime = new Date(tripForm.departure_at).getTime();
+    const returnTime = new Date(tripForm.return_at).getTime();
+    const registrationClosesTime = tripForm.registration_closes_at
+      ? new Date(tripForm.registration_closes_at).getTime()
+      : null;
+    if (!Number.isFinite(departureTime) || !Number.isFinite(returnTime)) {
+      setError("Enter valid departure and return dates and times.");
+      return;
+    }
+    if (returnTime <= departureTime) {
       setError("Return date and time must be after departure.");
+      return;
+    }
+    if (
+      registrationClosesTime !== null &&
+      (!Number.isFinite(registrationClosesTime) ||
+        registrationClosesTime >= departureTime)
+    ) {
+      setError("Registration must close before the departure date and time.");
       return;
     }
     if (!tripForm.is_free && Number(tripForm.price) < 0) {
@@ -288,12 +682,16 @@ export default function Trips() {
       return;
     }
     const assignmentsByVehicle = new Map();
+    const selectedLearnerIds = Object.keys(selectedLearners).filter(
+      (id) => selectedLearners[id],
+    );
+    const unassignedLearnerIds = [];
     for (const learner of resources.learners) {
       if (!selectedLearners[learner.id]) continue;
       const vehicleId = learnerAssignments[learner.id];
       if (!vehicleId) {
-        setError(`Assign ${learner.name} to a school vehicle.`);
-        return;
+        unassignedLearnerIds.push(learner.id);
+        continue;
       }
       if (!assignmentsByVehicle.has(vehicleId))
         assignmentsByVehicle.set(vehicleId, []);
@@ -318,11 +716,28 @@ export default function Trips() {
         };
       },
     );
-    if (selectedCount && !vehiclePayload.length) {
-      setError("Add a school vehicle and assign learners before saving.");
+    const saveAsDraft = !editingTrip && vehiclePayload.length === 0;
+    const status = saveAsDraft ? "draft" : tripForm.status;
+    const canKeepUnassignedLearners =
+      status === "draft" && vehiclePayload.length === 0;
+    if (unassignedLearnerIds.length && !canKeepUnassignedLearners) {
+      const learner = resources.learners.find(
+        (item) => item.id === unassignedLearnerIds[0],
+      );
+      setError(
+        `Assign ${learner?.name || "each selected learner"} to a school vehicle.`,
+      );
       return;
     }
-    if (selectedCount > selectedCapacity) {
+    const unstaffedVehicle = vehiclePayload.find(
+      (assignment) =>
+        !assignment.driver_admin_id && !assignment.coordinator_admin_id,
+    );
+    if (unstaffedVehicle) {
+      setError("Assign a driver or trip coordinator to every vehicle.");
+      return;
+    }
+    if (vehiclePayload.length && selectedCount > selectedCapacity) {
       setError(
         "Learners exceed the passenger capacity of the assigned vehicles.",
       );
@@ -332,6 +747,7 @@ export default function Trips() {
     try {
       const payload = {
         ...tripForm,
+        status,
         destination_latitude:
           tripForm.destination_latitude === ""
             ? null
@@ -353,9 +769,7 @@ export default function Trips() {
           ? new Date(tripForm.registration_closes_at).toISOString()
           : null,
         vehicles: vehiclePayload,
-        child_ids: Object.keys(selectedLearners).filter(
-          (id) => selectedLearners[id],
-        ),
+        child_ids: selectedLearnerIds,
       };
       const savedTrip = await apiRequest(
         editingTrip ? `/school/trips/${editingTrip.id}` : "/school/trips",
@@ -368,7 +782,13 @@ export default function Trips() {
       await loadData();
       setModal(null);
       setSelectedTrip(savedTrip);
-      successMessage({ title: editingTrip ? "Trip updated" : "Trip created" });
+      successMessage({
+        title: saveAsDraft
+          ? "Trip saved as draft — assign a vehicle to publish"
+          : editingTrip
+            ? "Trip updated"
+            : "Trip created",
+      });
     } catch (requestError) {
       setError(requestError.message || "Unable to save trip.");
     } finally {
@@ -381,22 +801,64 @@ export default function Trips() {
     setError("");
     setSaving(true);
     try {
-      const vehicle = await apiRequest("/school/vehicles", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${auth.token || ""}` },
-        body: JSON.stringify({
-          ...vehicleForm,
-          year: vehicleForm.year ? Number(vehicleForm.year) : null,
-          passenger_capacity: Number(vehicleForm.passenger_capacity),
-        }),
-      });
-      setResources((current) => ({
-        ...current,
-        vehicles: [...current.vehicles, vehicle],
-      }));
+      let vehicle = await apiRequest(
+        editingVehicle
+          ? `/school/vehicles/${editingVehicle.id}`
+          : "/school/vehicles",
+        {
+          method: editingVehicle ? "PATCH" : "POST",
+          headers: { Authorization: `Bearer ${auth.token || ""}` },
+          body: JSON.stringify({
+            ...vehicleForm,
+            year: vehicleForm.year ? Number(vehicleForm.year) : null,
+            passenger_capacity: Number(vehicleForm.passenger_capacity),
+          }),
+        },
+      );
+      const updateVehicleInResources = (savedVehicle) =>
+        setResources((current) => ({
+          ...current,
+          vehicles: editingVehicle
+            ? current.vehicles.map((item) =>
+                item.id === savedVehicle.id ? savedVehicle : item,
+              )
+            : current.vehicles.some((item) => item.id === savedVehicle.id)
+              ? current.vehicles.map((item) =>
+                  item.id === savedVehicle.id ? savedVehicle : item,
+                )
+              : [...current.vehicles, savedVehicle],
+        }));
+      updateVehicleInResources(vehicle);
+      if (vehicleAssets.photos.length || vehicleAssets.documents.length) {
+        const assets = new FormData();
+        vehicleAssets.photos.forEach((file) => assets.append("photos", file));
+        vehicleAssets.documents.forEach((file) =>
+          assets.append("documents", file),
+        );
+        try {
+          vehicle = await apiRequest(`/school/vehicles/${vehicle.id}/assets`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${auth.token || ""}` },
+            body: assets,
+          });
+        } catch (assetError) {
+          setEditingVehicle(vehicle);
+          throw new Error(
+            `Vehicle saved, but its assets could not be uploaded. You can retry from Edit vehicle. ${assetError.message || ""}`,
+            { cause: assetError },
+          );
+        }
+        updateVehicleInResources(vehicle);
+      }
       setVehicleForm(emptyVehicle);
+      setVehicleAssets({ photos: [], documents: [] });
+      setEditingVehicle(null);
       setModal(null);
-      successMessage({ title: "School vehicle added" });
+      successMessage({
+        title: editingVehicle
+          ? "School vehicle updated"
+          : "School vehicle added",
+      });
     } catch (requestError) {
       setError(requestError.message || "Unable to add school vehicle.");
     } finally {
@@ -420,6 +882,40 @@ export default function Trips() {
     }
   };
 
+  const updateTripLearner = async (trip, learner, changes) => {
+    try {
+      const updatedLearner = await apiRequest(
+        `/school/trips/${trip.id}/learners/${learner.child_id}`,
+        {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${auth.token || ""}` },
+          body: JSON.stringify(changes),
+        },
+      );
+      const applyLearnerUpdate = (currentTrip) => {
+        if (!currentTrip || currentTrip.id !== trip.id) return currentTrip;
+        const applyToLearner = (item) =>
+          item.child_id === learner.child_id
+            ? { ...item, ...updatedLearner }
+            : item;
+        return {
+          ...currentTrip,
+          learners: (currentTrip.learners || []).map(applyToLearner),
+          vehicles: (currentTrip.vehicles || []).map((assignment) => ({
+            ...assignment,
+            learners: (assignment.learners || []).map(applyToLearner),
+          })),
+        };
+      };
+      setTrips((current) => current.map(applyLearnerUpdate));
+      setSelectedTrip(applyLearnerUpdate);
+    } catch (requestError) {
+      showErrorAlert(
+        requestError.message || "Unable to update learner status.",
+      );
+    }
+  };
+
   const startLocationSharing = (assignment) => {
     if (!navigator.geolocation) {
       showErrorAlert("Location sharing is not available in this browser.");
@@ -429,40 +925,118 @@ export default function Trips() {
       showErrorAlert("Start the trip before sharing live location.");
       return;
     }
+    if (locationWatchRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchRef.current);
+      locationWatchRef.current = null;
+    }
+    if (trackingIntervalRef.current !== null) {
+      window.clearInterval(trackingIntervalRef.current);
+      trackingIntervalRef.current = null;
+    }
+    setTrackingError("");
     setSharingAssignment(assignment.id);
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          await apiRequest(
-            `/school/trips/${selectedTrip.id}/vehicles/${assignment.id}/location`,
-            {
-              method: "POST",
-              headers: { Authorization: `Bearer ${auth.token || ""}` },
-              body: JSON.stringify({
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude,
-                accuracy: position.coords.accuracy,
-                heading: position.coords.heading,
-                speed: position.coords.speed,
-              }),
-            },
+    const sendLocation = (position) => {
+      const coords = position.coords;
+      void apiRequest(
+        `/school/trips/${selectedTrip.id}/vehicles/${assignment.id}/location`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${auth.token || ""}` },
+          body: JSON.stringify({
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            accuracy: coords.accuracy,
+            heading: coords.heading,
+            speed: coords.speed,
+          }),
+        },
+      )
+        .then((tracking) => {
+          setTrips((current) =>
+            current.map((trip) =>
+              trip.id !== selectedTrip.id
+                ? trip
+                : {
+                    ...trip,
+                    vehicles: (trip.vehicles || []).map((item) =>
+                      item.id === assignment.id ? { ...item, tracking } : item,
+                    ),
+                  },
+            ),
           );
-        } catch (requestError) {
-          setError(requestError.message || "Unable to share location.");
-        } finally {
+          setSelectedTrip((current) =>
+            current?.id !== selectedTrip.id
+              ? current
+              : {
+                  ...current,
+                  vehicles: (current.vehicles || []).map((item) =>
+                    item.id === assignment.id ? { ...item, tracking } : item,
+                  ),
+                },
+          );
+          setTrackingError("");
+          setSharingAssignment(assignment.id);
+        })
+        .catch((requestError) => {
+          setTrackingError(requestError.message || "Unable to share location.");
           setSharingAssignment(null);
+        });
+    };
+
+    locationWatchRef.current = navigator.geolocation.watchPosition(
+      sendLocation,
+      async (position) => {
+        setTrackingError(
+          position.message || "Unable to access device location.",
+        );
+        if (locationWatchRef.current !== null) {
+          navigator.geolocation.clearWatch(locationWatchRef.current);
+          setSharingAssignment(null);
+          locationWatchRef.current = null;
         }
       },
-      (locationError) => {
-        setSharingAssignment(null);
-        showErrorAlert(
-          locationError.message ||
-            "Allow location access to share this trip vehicle.",
-        );
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 },
     );
+    trackingIntervalRef.current = window.setInterval(() => {
+      if (
+        !navigator.geolocation ||
+        !selectedTrip ||
+        !locationWatchRef.current
+      ) {
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        sendLocation,
+        (locationError) => setTrackingError(locationError.message),
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 },
+      );
+    }, 15000);
   };
+
+  const stopLocationSharing = () => {
+    if (locationWatchRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(locationWatchRef.current);
+      locationWatchRef.current = null;
+    }
+    if (trackingIntervalRef.current !== null) {
+      window.clearInterval(trackingIntervalRef.current);
+      trackingIntervalRef.current = null;
+    }
+    setSharingAssignment(null);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (locationWatchRef.current !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(locationWatchRef.current);
+        locationWatchRef.current = null;
+      }
+      if (trackingIntervalRef.current !== null) {
+        window.clearInterval(trackingIntervalRef.current);
+        trackingIntervalRef.current = null;
+      }
+    };
+  }, [selectedTrip?.id, selectedTrip?.status]);
 
   const tabs = [
     "All trips",
@@ -473,12 +1047,25 @@ export default function Trips() {
   const detailTrip =
     (selectedTrip && trips.find((item) => item.id === selectedTrip.id)) ||
     selectedTrip;
+  const detailHasAssignedVehicle = (detailTrip?.vehicles || []).length > 0;
+  const detailStatuses = availableTripStatuses(
+    detailTrip?.status,
+    detailHasAssignedVehicle,
+  );
   const dateInput = (field, label, required = false) => (
     <label>
       {label}
       <input
         type="datetime-local"
         required={required}
+        min={
+          field === "return_at" ? tripForm.departure_at || undefined : undefined
+        }
+        max={
+          field === "registration_closes_at"
+            ? tripForm.departure_at || undefined
+            : undefined
+        }
         value={tripForm[field] || ""}
         onChange={(event) =>
           setTripForm((current) => ({
@@ -569,14 +1156,14 @@ export default function Trips() {
               <FiUsers />
             </span>
             <div>
-              <small>Registered learners</small>
+              <small>Eligible learners</small>
               <strong>
                 {trips.reduce(
                   (sum, item) => sum + (item.registered_count || 0),
                   0,
                 )}
               </strong>
-              <em>Across all trips</em>
+              <em>Paid on paid trips; registered on free trips</em>
             </div>
           </article>
           <article>
@@ -676,6 +1263,45 @@ export default function Trips() {
               }}
               placeholder="Destination"
             />
+            <input
+              aria-label="Filter by departure date"
+              type="date"
+              value={dateFilter}
+              onChange={(event) => {
+                setDateFilter(event.target.value);
+                setPage(1);
+              }}
+            />
+            <select
+              aria-label="Filter by school vehicle"
+              value={vehicleFilter}
+              onChange={(event) => {
+                setVehicleFilter(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">All vehicles</option>
+              {resources.vehicles.map((vehicle) => (
+                <option key={vehicle.id} value={vehicle.id}>
+                  {vehicle.name} · {vehicle.registration_number}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by driver or coordinator"
+              value={staffFilter}
+              onChange={(event) => {
+                setStaffFilter(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">All staff</option>
+              {resources.staff.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {fullName(person)} · {person.job_title || person.role}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               className="trip-primary"
@@ -716,10 +1342,11 @@ export default function Trips() {
                       <th>Destination</th>
                       <th>Departure</th>
                       <th>Return</th>
-                      <th>Learners</th>
+                      <th>Eligible learners</th>
                       <th>Vehicle & staff</th>
                       <th>Price</th>
                       <th>Status</th>
+                      <th>Registration</th>
                       <th>Open</th>
                     </tr>
                   </thead>
@@ -783,6 +1410,13 @@ export default function Trips() {
                             className={`trip-status trip-status-${trip.status}`}
                           >
                             {trip.status.replaceAll("_", " ")}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className={`trip-registration trip-registration-${registrationState(trip).toLowerCase().replaceAll(" ", "-")}`}
+                          >
+                            {registrationState(trip)}
                           </span>
                         </td>
                         <td>
@@ -885,15 +1519,12 @@ export default function Trips() {
               <section className="trip-form-section">
                 <h3>Trip information</h3>
                 <div className="trip-form-grid">
-                  <label>
-                    Trip name
-                    <input
-                      required
-                      value={tripForm.name}
-                      onChange={setTripField("name")}
-                      placeholder="Pretoria Science Museum"
-                    />
-                  </label>
+                  <TripPlaceNameInput
+                    tripForm={tripForm}
+                    setTripForm={setTripForm}
+                    onPlaceSelected={handlePlaceSelected}
+                    onPlaceSearchChanged={handlePlaceSearchChanged}
+                  />
                   <label>
                     Category
                     <select
@@ -906,6 +1537,9 @@ export default function Trips() {
                         </option>
                       ))}
                     </select>
+                    <small className="trip-field-hint">
+                      Trip category is used to group trips in the list and
+                    </small>
                   </label>
                   <label className="trip-form-full">
                     Description
@@ -920,6 +1554,7 @@ export default function Trips() {
                     Destination name
                     <input
                       required
+                      disabled={destinationLocked}
                       value={tripForm.destination}
                       onChange={setTripField("destination")}
                     />
@@ -928,6 +1563,7 @@ export default function Trips() {
                     Destination address
                     <input
                       required
+                      disabled={destinationLocked}
                       value={tripForm.destination_address}
                       onChange={setTripField("destination_address")}
                     />
@@ -937,6 +1573,7 @@ export default function Trips() {
                     <input
                       type="number"
                       step="any"
+                      disabled={destinationLocked}
                       value={tripForm.destination_latitude}
                       onChange={setTripField("destination_latitude")}
                       placeholder="Optional"
@@ -947,11 +1584,17 @@ export default function Trips() {
                     <input
                       type="number"
                       step="any"
+                      disabled={destinationLocked}
                       value={tripForm.destination_longitude}
                       onChange={setTripField("destination_longitude")}
                       placeholder="Optional"
                     />
                   </label>
+                  <TripDestinationPicker
+                    tripForm={tripForm}
+                    setTripForm={setTripForm}
+                    locked={destinationLocked}
+                  />
                   {dateInput("departure_at", "Departure date & time", true)}
                   {dateInput("return_at", "Return date & time", true)}
                   {dateInput("registration_closes_at", "Registration closes")}
@@ -1039,86 +1682,62 @@ export default function Trips() {
                   <div>
                     <h3>Participating learners</h3>
                     <p>
-                      {selectedCount} selected ·{" "}
+                      {selectedCount} learners selected ·{" "}
                       {Math.max(0, selectedCapacity - selectedCount)} assigned
                       vehicle spaces remaining
                     </p>
                   </div>
                   <span>{resources.learners.length} school learners</span>
                 </div>
-                <div className="trip-learner-tools">
-                  <label className="trips-search">
-                    <FiSearch />
-                    <input
-                      value={learnerQuery}
-                      onChange={(event) => setLearnerQuery(event.target.value)}
-                      placeholder="Search learners"
-                    />
+                <div className="trip-learner-selectors">
+                  <label>
+                    Select which students
+                    <select
+                      value={gradeFilter}
+                      onChange={(event) =>
+                        selectLearnerGrade(event.target.value)
+                      }
+                    >
+                      <option value="all">Select a grade</option>
+
+                      <option value="all">All grades</option>
+                      {grades.map((grade) => (
+                        <option key={grade} value={grade}>
+                          Grade {grade}
+                        </option>
+                      ))}
+                    </select>
+                    <small>
+                      {selectedCount
+                        ? `${selectedCount} learner${selectedCount === 1 ? "" : "s"} selected`
+                        : "Choose a grade to select its learners."}
+                    </small>
                   </label>
-                  <select
-                    value={gradeFilter}
-                    onChange={(event) => setGradeFilter(event.target.value)}
-                  >
-                    <option value="all">All grades</option>
-                    {grades.map((grade) => (
-                      <option key={grade} value={grade}>
-                        {grade}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="trip-learner-list">
-                  {filteredLearners.map((student) => (
-                    <div className="trip-learner-row" key={student.id}>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(selectedLearners[student.id])}
-                          onChange={(event) =>
-                            setSelectedLearners((current) => ({
-                              ...current,
-                              [student.id]: event.target.checked,
-                            }))
-                          }
-                        />
-                        <span>
-                          {student.name} {student.lastname}
-                        </span>
-                        <small>{student.grade || "Grade not set"}</small>
-                      </label>
-                      {selectedLearners[student.id] && (
-                        <select
-                          aria-label={`Vehicle for ${student.name}`}
-                          value={learnerAssignments[student.id] || ""}
-                          onChange={(event) =>
-                            setLearnerAssignments((current) => ({
-                              ...current,
-                              [student.id]: event.target.value,
-                            }))
-                          }
-                        >
-                          <option value="">Select vehicle</option>
-                          {resources.vehicles
-                            .filter((vehicle) =>
-                              ["available", "assigned"].includes(
-                                vehicle.status,
-                              ),
-                            )
-                            .map((vehicle) => (
-                              <option key={vehicle.id} value={vehicle.id}>
-                                {vehicle.name} · {vehicle.registration_number} ·{" "}
-                                {vehicle.passenger_capacity} seats
-                              </option>
-                            ))}
-                        </select>
-                      )}
-                    </div>
-                  ))}
-                  {filteredLearners.length === 0 && (
-                    <p className="trip-no-learners">
-                      No learners match this search.
-                    </p>
-                  )}
+                  <label>
+                    Vehicle for selected students
+                    <select
+                      value={learnerVehicleChoice}
+                      disabled={!selectedCount}
+                      onChange={(event) =>
+                        assignSelectedLearnersToVehicle(event.target.value)
+                      }
+                    >
+                      <option value="">No vehicle yet</option>
+                      {resources.vehicles
+                        .filter((vehicle) =>
+                          ["available", "assigned"].includes(vehicle.status),
+                        )
+                        .map((vehicle) => (
+                          <option key={vehicle.id} value={vehicle.id}>
+                            {vehicle.name} · {vehicle.registration_number} ·{" "}
+                            {vehicle.passenger_capacity} seats
+                          </option>
+                        ))}
+                    </select>
+                    <small>
+                      All selected learners will be assigned to this vehicle.
+                    </small>
+                  </label>
                 </div>
               </section>
               <section className="trip-form-section">
@@ -1177,7 +1796,7 @@ export default function Trips() {
                           </select>
                         </label>
                         <label>
-                          Coordinator
+                          Trip coordinator (school staff)
                           <select
                             defaultValue={
                               assignment?.coordinator_admin_id || ""
@@ -1190,7 +1809,9 @@ export default function Trips() {
                               }))
                             }
                           >
-                            <option value="">Select staff coordinator</option>
+                            <option value="">
+                              Select school staff coordinator
+                            </option>
                             {resources.staff.map((person) => (
                               <option key={person.id} value={person.id}>
                                 {fullName(person)} ·{" "}
@@ -1204,12 +1825,23 @@ export default function Trips() {
                   })
                 ) : (
                   <div className="trip-no-vehicles">
+                    {!editingTrip && (
+                      <span>
+                        No vehicle is assigned. This trip will be saved as a
+                        draft until you assign a school vehicle.{" "}
+                      </span>
+                    )}
                     Select learners and assign them to vehicles to allocate a
                     driver or trip coordinator.{" "}
                     <button
                       type="button"
                       className="trip-secondary"
-                      onClick={() => setModal("vehicle")}
+                      onClick={() => {
+                        setEditingVehicle(null);
+                        setVehicleForm(emptyVehicle);
+                        setVehicleAssets({ photos: [], documents: [] });
+                        setModal("vehicle");
+                      }}
                     >
                       <FiPlus /> Add school vehicle
                     </button>
@@ -1233,7 +1865,13 @@ export default function Trips() {
                       value={tripForm.status}
                       onChange={setTripField("status")}
                     >
-                      {statuses.map((status) => (
+                      {(editingTrip
+                        ? availableTripStatuses(
+                            editingTrip.status,
+                            (editingTrip.vehicles || []).length > 0,
+                          )
+                        : ["draft", "registration_open"]
+                      ).map((status) => (
                         <option key={status} value={status}>
                           {status.replaceAll("_", " ")}
                         </option>
@@ -1293,7 +1931,11 @@ export default function Trips() {
             <header>
               <div>
                 <p className="page-kicker">SCHOOL FLEET</p>
-                <h2 id="school-vehicle-title">Add school vehicle</h2>
+                <h2 id="school-vehicle-title">
+                  {editingVehicle
+                    ? "Edit school vehicle"
+                    : "Add school vehicle"}
+                </h2>
                 <p>
                   This vehicle is stored under the current school, never under a
                   transport owner.
@@ -1427,6 +2069,62 @@ export default function Trips() {
                     ))}
                   </select>
                 </label>
+                <label className="trip-form-full">
+                  Vehicle photos
+                  {editingVehicle?.photos?.length > 0 && (
+                    <span className="trip-vehicle-assets-current">
+                      {editingVehicle.photos.map((photo, index) => (
+                        <a
+                          key={photo.fileName || photo.url || index}
+                          href={photo.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Photo {index + 1}
+                        </a>
+                      ))}
+                    </span>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    multiple
+                    onChange={(event) =>
+                      setVehicleAssets((current) => ({
+                        ...current,
+                        photos: Array.from(event.target.files || []),
+                      }))
+                    }
+                  />
+                </label>
+                <label className="trip-form-full">
+                  Vehicle documents (PDF or image)
+                  {editingVehicle?.documents?.length > 0 && (
+                    <span className="trip-vehicle-assets-current">
+                      {editingVehicle.documents.map((document, index) => (
+                        <a
+                          key={document.fileName || document.url || index}
+                          href={document.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Document {index + 1}
+                        </a>
+                      ))}
+                    </span>
+                  )}
+                  <input
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+                    multiple
+                    onChange={(event) =>
+                      setVehicleAssets((current) => ({
+                        ...current,
+                        documents: Array.from(event.target.files || []),
+                      }))
+                    }
+                  />
+                </label>
               </div>
               {error && (
                 <div className="trip-error" role="alert">
@@ -1437,7 +2135,11 @@ export default function Trips() {
                 <button
                   type="button"
                   className="trip-secondary"
-                  onClick={() => setModal(editingTrip ? "trip" : "vehicles")}
+                  onClick={() => {
+                    setEditingVehicle(null);
+                    setModal(editingTrip ? "trip" : "vehicles");
+                    setVehicleAssets({ photos: [], documents: [] });
+                  }}
                 >
                   Cancel
                 </button>
@@ -1446,7 +2148,11 @@ export default function Trips() {
                   className="trip-primary"
                   disabled={saving}
                 >
-                  {saving ? "Saving…" : "Add school vehicle"}
+                  {saving
+                    ? "Saving…"
+                    : editingVehicle
+                      ? "Save vehicle"
+                      : "Add school vehicle"}
                 </button>
               </footer>
             </form>
@@ -1481,7 +2187,9 @@ export default function Trips() {
                 type="button"
                 className="trip-primary"
                 onClick={() => {
+                  setEditingVehicle(null);
                   setVehicleForm(emptyVehicle);
+                  setVehicleAssets({ photos: [], documents: [] });
                   setModal("vehicle");
                 }}
               >
@@ -1507,6 +2215,22 @@ export default function Trips() {
                     >
                       {vehicle.status}
                     </span>
+                    <button
+                      type="button"
+                      className="trip-secondary"
+                      onClick={() => {
+                        setEditingVehicle(vehicle);
+                        setVehicleAssets({ photos: [], documents: [] });
+                        setVehicleForm({
+                          ...emptyVehicle,
+                          ...vehicle,
+                          year: vehicle.year || "",
+                        });
+                        setModal("vehicle");
+                      }}
+                    >
+                      <FiEdit2 /> Edit
+                    </button>
                   </article>
                 ))}
               </div>
@@ -1518,7 +2242,9 @@ export default function Trips() {
                   type="button"
                   className="trip-primary"
                   onClick={() => {
+                    setEditingVehicle(null);
                     setVehicleForm(emptyVehicle);
+                    setVehicleAssets({ photos: [], documents: [] });
                     setModal("vehicle");
                   }}
                 >
@@ -1545,12 +2271,13 @@ export default function Trips() {
             aria-labelledby="trip-detail-title"
           >
             <header>
-              <div>
+              <div className="trip-detail-header-copy">
                 <p className="page-kicker">TRIP OVERVIEW</p>
                 <h2 id="trip-detail-title">{detailTrip.name}</h2>
-                <p>
-                  {detailTrip.destination} ·{" "}
-                  {displayDate(detailTrip.departure_at)}
+                <p className="trip-detail-header-summary">
+                  <FiMapPin /> {detailTrip.destination}
+                  <span aria-hidden="true">·</span>
+                  <FiCalendar /> {displayDate(detailTrip.departure_at)}
                 </p>
               </div>
               <button
@@ -1583,43 +2310,87 @@ export default function Trips() {
                     void updateStatus(detailTrip, event.target.value)
                   }
                 >
-                  {statuses.map((status) => (
+                  {detailStatuses.map((status) => (
                     <option key={status} value={status}>
                       {status.replaceAll("_", " ")}
                     </option>
                   ))}
                 </select>
+                {!detailHasAssignedVehicle && (
+                  <small className="trip-detail-status-note">
+                    Without a vehicle, only draft or preparing is available.
+                  </small>
+                )}
               </div>
-              <section className="trip-detail-overview">
-                <h3>Schedule & pricing</h3>
-                <dl>
-                  <dt>Destination</dt>
-                  <dd>{detailTrip.destination_address}</dd>
-                  <dt>Departure</dt>
-                  <dd>{displayDate(detailTrip.departure_at)}</dd>
-                  <dt>Return</dt>
-                  <dd>{displayDate(detailTrip.return_at)}</dd>
-                  <dt>Price</dt>
-                  <dd>{money(detailTrip)}</dd>
-                  <dt>Registration</dt>
-                  <dd>
-                    {detailTrip.registered_count || 0}
-                    {detailTrip.maximum_learners
-                      ? ` / ${detailTrip.maximum_learners}`
-                      : ""}{" "}
-                    learners
-                  </dd>
+              <section className="trip-detail-overview trip-detail-schedule">
+                <div className="trip-detail-section-heading">
+                  <div>
+                    <h3>Schedule & pricing</h3>
+                    <p>Key details for this school trip</p>
+                  </div>
+                  <span className="trip-detail-category">
+                    {categories.find(
+                      ([value]) => value === detailTrip.category,
+                    )?.[1] || "School trip"}
+                  </span>
+                </div>
+                <dl className="trip-detail-facts">
+                  <div className="trip-detail-fact trip-detail-fact-wide">
+                    <dt>Destination address</dt>
+                    <dd>{detailTrip.destination_address || "Not provided"}</dd>
+                  </div>
+                  <div className="trip-detail-fact">
+                    <dt>Departure</dt>
+                    <dd>{displayDate(detailTrip.departure_at)}</dd>
+                  </div>
+                  <div className="trip-detail-fact">
+                    <dt>Return</dt>
+                    <dd>{displayDate(detailTrip.return_at)}</dd>
+                  </div>
+                  <div className="trip-detail-fact">
+                    <dt>Trip price</dt>
+                    <dd>{money(detailTrip)}</dd>
+                  </div>
+                  <div className="trip-detail-fact">
+                    <dt>
+                      {detailTrip.is_free
+                        ? "Registered learners"
+                        : "Paid learners"}
+                    </dt>
+                    <dd>
+                      {detailTrip.registered_count || 0}
+                      {detailTrip.maximum_learners
+                        ? ` / ${detailTrip.maximum_learners}`
+                        : ""}{" "}
+                      learners
+                    </dd>
+                  </div>
                 </dl>
-                {detailTrip.description && <p>{detailTrip.description}</p>}
+                {detailTrip.description && (
+                  <p className="trip-detail-description">
+                    {detailTrip.description}
+                  </p>
+                )}
               </section>
-              <section className="trip-detail-overview">
-                <h3>Vehicles & assigned learners</h3>
+              <section className="trip-detail-overview trip-detail-transport">
+                <div className="trip-detail-section-heading">
+                  <div>
+                    <h3>Vehicles & assigned learners</h3>
+                    <p>Transport and attendance for this trip</p>
+                  </div>
+                  <span className="trip-detail-count">
+                    {(detailTrip.vehicles || []).length} vehicles
+                  </span>
+                </div>
+                {detailTrip.status === "in_progress" && (
+                  <TripLiveMap trip={detailTrip} />
+                )}
                 {(detailTrip.vehicles || []).map((assignment) => (
                   <article
                     className="trip-detail-assignment"
                     key={assignment.id}
                   >
-                    <div>
+                    <div className="trip-detail-vehicle-header">
                       <strong>
                         {assignment.vehicle?.name} ·{" "}
                         {assignment.vehicle?.registration_number}
@@ -1633,18 +2404,27 @@ export default function Trips() {
                     </div>
                     <button
                       type="button"
-                      className="trip-secondary"
-                      disabled={
-                        detailTrip.status !== "in_progress" ||
+                      className="trip-secondary trip-detail-share"
+                      disabled={detailTrip.status !== "in_progress"}
+                      onClick={() =>
                         sharingAssignment === assignment.id
+                          ? stopLocationSharing()
+                          : startLocationSharing(assignment)
                       }
-                      onClick={() => startLocationSharing(assignment)}
                     >
                       {sharingAssignment === assignment.id
-                        ? "Getting location…"
+                        ? "Stop sharing"
                         : "Share my location"}
                     </button>
-                    <small>
+                    {trackingError && sharingAssignment === null && (
+                      <small
+                        role="alert"
+                        className="trip-location-error trip-detail-tracking"
+                      >
+                        {trackingError}
+                      </small>
+                    )}
+                    <small className="trip-detail-tracking">
                       {assignment.tracking
                         ? `Last location ${new Date(assignment.tracking.recorded_at).toLocaleTimeString()}`
                         : "Location unavailable · No GPS update"}
@@ -1658,33 +2438,51 @@ export default function Trips() {
                           {learner.child?.name} {learner.child?.lastname} ·{" "}
                           {learner.child?.grade || "Grade unset"}
                         </span>
+                        {detailTrip.is_free ? (
+                          <label className="trip-detail-registration-toggle">
+                            <input
+                              type="checkbox"
+                              checked={
+                                learner.registration_status === "registered" ||
+                                !learner.registration_status
+                              }
+                              onChange={(event) =>
+                                void updateTripLearner(detailTrip, learner, {
+                                  registration_status: event.target.checked
+                                    ? "registered"
+                                    : "cancelled",
+                                })
+                              }
+                            />
+                            <span>Registered</span>
+                          </label>
+                        ) : (
+                          <label className="trip-detail-payment-control">
+                            <span>Payment</span>
+                            <select
+                              aria-label={`Payment status for ${learner.child?.name}`}
+                              value={learner.payment_status || "unpaid"}
+                              onChange={(event) =>
+                                void updateTripLearner(detailTrip, learner, {
+                                  payment_status: event.target.value,
+                                })
+                              }
+                            >
+                              <option value="unpaid">Unpaid</option>
+                              <option value="deposit_paid">Deposit paid</option>
+                              <option value="paid">Paid</option>
+                              <option value="waived">Waived</option>
+                            </select>
+                          </label>
+                        )}
                         <select
                           aria-label={`Attendance for ${learner.child?.name}`}
                           value={learner.attendance_status}
-                          onChange={async (event) => {
-                            try {
-                              await apiRequest(
-                                `/school/trips/${detailTrip.id}/learners/${learner.child_id}`,
-                                {
-                                  method: "PATCH",
-                                  headers: {
-                                    Authorization: `Bearer ${auth.token || ""}`,
-                                  },
-                                  body: JSON.stringify({
-                                    attendance_status: event.target.value,
-                                  }),
-                                },
-                              );
-                              await loadData();
-                              setSelectedTrip(
-                                trips.find(
-                                  (item) => item.id === detailTrip.id,
-                                ) || detailTrip,
-                              );
-                            } catch (requestError) {
-                              showErrorAlert(requestError.message);
-                            }
-                          }}
+                          onChange={(event) =>
+                            void updateTripLearner(detailTrip, learner, {
+                              attendance_status: event.target.value,
+                            })
+                          }
                         >
                           <option value="not_checked">Not checked</option>
                           <option value="present">Present</option>
@@ -1695,13 +2493,33 @@ export default function Trips() {
                   </article>
                 ))}
                 {!(detailTrip.vehicles || []).length && (
-                  <p>No school vehicles assigned.</p>
+                  <p className="trip-detail-empty">
+                    No school vehicles are assigned to this trip yet.
+                  </p>
                 )}
               </section>
-              <section className="trip-detail-overview">
-                <h3>Emergency contact</h3>
-                <p>{detailTrip.emergency_contact || "Not provided"}</p>
-                <p>{detailTrip.emergency_notes || "No emergency notes"}</p>
+              <section className="trip-detail-overview trip-detail-emergency">
+                <div className="trip-detail-section-heading">
+                  <div>
+                    <h3>Emergency & safety</h3>
+                    <p>Important contact information for the trip</p>
+                  </div>
+                </div>
+                <div className="trip-detail-emergency-grid">
+                  <div>
+                    <span>Emergency contact</span>
+                    <strong>
+                      {detailTrip.emergency_contact || "Not provided"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Safety notes</span>
+                    <p>
+                      {detailTrip.emergency_notes ||
+                        "No emergency notes provided."}
+                    </p>
+                  </div>
+                </div>
               </section>
             </div>
           </section>
