@@ -29,7 +29,7 @@ const menuItems = [
   // { title: "Drivers", icon: <FiUserCheck />, path: "/drivers" },
   // { title: "Vehicles", icon: <FaBus />, path: "/vehicles" },
   { title: "Routes", icon: <FiMap />, path: "/routes" },
-  { title: "Trips", icon: <FiTruck />, path: "/trips" },
+  { title: "Trips ✓", icon: <FiTruck />, path: "/trips" },
   { title: "Live Tracking ✓✓", icon: <FiNavigation />, path: "/tracking" },
   { title: "Attendance ✓", icon: <FiActivity />, path: "/attendance" },
   { title: "Parents ✓", icon: <FiUsers />, path: "/parents" },

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertCircle,
-  FiArrowUpRight,
   FiCalendar,
   FiCheckCircle,
+  FiChevronLeft,
+  FiChevronRight,
   FiEdit2,
+  FiEye,
+  FiLoader,
   FiMapPin,
   FiPlus,
   FiSearch,
@@ -53,7 +56,7 @@ const tripStatusTransitions = {
     "cancelled",
   ],
   confirmed: ["draft", "confirmed", "preparing", "cancelled"],
-  preparing: ["draft", "preparing", "in_progress", "cancelled"],
+  preparing: ["draft", "preparing", "cancelled"],
   in_progress: ["in_progress", "completed"],
   completed: ["completed"],
   cancelled: ["cancelled"],
@@ -104,7 +107,7 @@ const emptyVehicle = {
   license_expiry: "",
   roadworthy_expiry: "",
   insurance_expiry: "",
-  status: "available",
+  preparing: ["draft", "preparing", "confirmed", "cancelled"],
 };
 const getAuth = () => {
   try {
@@ -134,6 +137,16 @@ const money = (trip) =>
   trip.is_free
     ? "Free"
     : `${trip.currency || "ZAR"} ${Number(trip.price || 0).toFixed(2)}`;
+const tripSeatCapacity = (trip) =>
+  (trip.vehicles || []).reduce(
+    (total, assignment) =>
+      total + Number(assignment.vehicle?.passenger_capacity || 0),
+    0,
+  );
+const tripSeatRequirement = (trip) =>
+  Number(trip.maximum_learners || trip.minimum_learners || 0);
+const tripNeedsMoreVehicles = (trip) =>
+  tripSeatRequirement(trip) > tripSeatCapacity(trip);
 const registrationState = (trip) => {
   if (trip.status === "draft") return "Not published";
   if (trip.status !== "registration_open") return "Closed";
@@ -383,6 +396,85 @@ function TripLiveMap({ trip }) {
   );
 }
 
+function SchoolVehicleCard({ vehicle, onEdit }) {
+  const photos = Array.isArray(vehicle.photos)
+    ? vehicle.photos
+        .map((photo) => (typeof photo === "string" ? photo : photo?.url))
+        .filter(Boolean)
+    : [];
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  const changePhoto = (direction) => {
+    setPhotoIndex(
+      (current) => (current + direction + photos.length) % photos.length,
+    );
+    setImageFailed(false);
+  };
+
+  return (
+    <article className="school-vehicle-card">
+      <div className="school-vehicle-photo">
+        {photos.length > 0 && !imageFailed ? (
+          <img
+            src={photos[photoIndex]}
+            alt={`${vehicle.name} photo ${photoIndex + 1}`}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <div className="school-vehicle-photo-placeholder" aria-hidden="true">
+            <FiTruck />
+            <span>No vehicle photo</span>
+          </div>
+        )}
+        <span className={`trip-status trip-status-${vehicle.status}`}>
+          {vehicle.status}
+        </span>
+        {photos.length > 1 && (
+          <>
+            <button
+              type="button"
+              className="school-vehicle-photo-nav previous"
+              aria-label={`Previous photo of ${vehicle.name}`}
+              onClick={() => changePhoto(-1)}
+            >
+              <FiChevronLeft />
+            </button>
+            <button
+              type="button"
+              className="school-vehicle-photo-nav next"
+              aria-label={`Next photo of ${vehicle.name}`}
+              onClick={() => changePhoto(1)}
+            >
+              <FiChevronRight />
+            </button>
+            <span className="school-vehicle-photo-count">
+              {photoIndex + 1} / {photos.length}
+            </span>
+          </>
+        )}
+      </div>
+      <div className="school-vehicle-card-content">
+        <div className="school-vehicle-card-heading">
+          <div>
+            <strong>{vehicle.name}</strong>
+            <small>{vehicle.registration_number}</small>
+          </div>
+          <span className="school-vehicle-type">{vehicle.vehicle_type}</span>
+        </div>
+        <div className="school-vehicle-card-footer">
+          <span>
+            <FiUsers aria-hidden="true" /> {vehicle.passenger_capacity} seats
+          </span>
+          <button type="button" className="trip-secondary" onClick={onEdit}>
+            <FiEdit2 /> Edit vehicle
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export default function Trips() {
   const auth = getAuth();
   const [trips, setTrips] = useState([]);
@@ -393,6 +485,7 @@ export default function Trips() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [updatingTripStatuses, setUpdatingTripStatuses] = useState({});
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("All trips");
   const [query, setQuery] = useState("");
@@ -411,7 +504,7 @@ export default function Trips() {
     setDestinationLocked(true);
   }, []);
   const handlePlaceSearchChanged = useCallback(() => {
-    if (!destinationLocked) return;
+    if (!destinationLocked || editingTrip) return;
     setDestinationLocked(false);
     setTripForm((current) => ({
       ...current,
@@ -420,11 +513,11 @@ export default function Trips() {
       destination_latitude: "",
       destination_longitude: "",
     }));
-  }, [destinationLocked]);
+  }, [destinationLocked, editingTrip]);
   const [gradeFilter, setGradeFilter] = useState("all");
   const [selectedLearners, setSelectedLearners] = useState({});
   const [learnerAssignments, setLearnerAssignments] = useState({});
-  const [learnerVehicleChoice, setLearnerVehicleChoice] = useState("");
+  const [learnerVehicleChoice, setLearnerVehicleChoice] = useState([]);
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle);
   const [editingVehicle, setEditingVehicle] = useState(null);
   const [vehicleAssets, setVehicleAssets] = useState({
@@ -489,14 +582,14 @@ export default function Trips() {
 
   const startTrip = (trip = null) => {
     setError("");
-    setDestinationLocked(false);
+    setDestinationLocked(Boolean(trip));
     setEditingTrip(trip);
     setGradeFilter("all");
     if (!trip) {
       setTripForm(emptyTrip);
       setSelectedLearners({});
       setLearnerAssignments({});
-      setLearnerVehicleChoice("");
+      setLearnerVehicleChoice([]);
       setModal("trip");
       return;
     }
@@ -514,20 +607,25 @@ export default function Trips() {
     });
     const selected = {};
     const learnerVehicles = {};
+    const assignmentById = new Map(
+      (trip.vehicles || []).map((assignment) => [assignment.id, assignment]),
+    );
     (trip.learners || []).forEach((item) => {
       if (item.registration_status === "registered") {
         selected[item.child_id] = true;
-        learnerVehicles[item.child_id] = item.vehicle_assignment_id || "";
+        learnerVehicles[item.child_id] =
+          assignmentById.get(item.vehicle_assignment_id)?.vehicle_id || "";
       }
     });
     setSelectedLearners(selected);
     setLearnerAssignments(learnerVehicles);
     const existingVehicleIds = [
-      ...new Set(Object.values(learnerVehicles).filter(Boolean)),
+      ...new Set([
+        ...(trip.vehicles || []).map((assignment) => assignment.vehicle_id),
+        ...Object.values(learnerVehicles).filter(Boolean),
+      ]),
     ];
-    setLearnerVehicleChoice(
-      existingVehicleIds.length === 1 ? existingVehicleIds[0] : "",
-    );
+    setLearnerVehicleChoice(existingVehicleIds);
     setModal("trip");
   };
 
@@ -594,6 +692,41 @@ export default function Trips() {
     currentPage * pageSize,
   );
   const selectedCount = Object.values(selectedLearners).filter(Boolean).length;
+  const assignLearnersToVehicles = (learnerIds, vehicleIds) => {
+    const selectedVehicleIds = [...new Set(vehicleIds)];
+    setLearnerVehicleChoice(selectedVehicleIds);
+    setLearnerAssignments((current) => {
+      const next = { ...current };
+      learnerIds.forEach((learnerId) => delete next[learnerId]);
+      const remainingSeats = new Map(
+        selectedVehicleIds.map((vehicleId) => [
+          vehicleId,
+          Number(
+            resources.vehicles.find((vehicle) => vehicle.id === vehicleId)
+              ?.passenger_capacity || 0,
+          ),
+        ]),
+      );
+      let vehicleIndex = 0;
+      learnerIds.forEach((learnerId) => {
+        for (
+          let attempts = 0;
+          attempts < selectedVehicleIds.length;
+          attempts += 1
+        ) {
+          const vehicleId =
+            selectedVehicleIds[vehicleIndex % selectedVehicleIds.length];
+          vehicleIndex = (vehicleIndex + 1) % selectedVehicleIds.length;
+          const seats = remainingSeats.get(vehicleId) || 0;
+          if (seats <= 0) continue;
+          next[learnerId] = vehicleId;
+          remainingSeats.set(vehicleId, seats - 1);
+          break;
+        }
+      });
+      return next;
+    });
+  };
   const selectLearnerGrade = (grade) => {
     setGradeFilter(grade);
     const selectedIds = resources.learners
@@ -602,36 +735,9 @@ export default function Trips() {
     setSelectedLearners(
       Object.fromEntries(selectedIds.map((learnerId) => [learnerId, true])),
     );
-    if (learnerVehicleChoice) {
-      setLearnerAssignments((current) => {
-        const next = { ...current };
-        selectedIds.forEach((learnerId) => {
-          next[learnerId] = learnerVehicleChoice;
-        });
-        return next;
-      });
-    }
+    assignLearnersToVehicles(selectedIds, learnerVehicleChoice);
   };
-  const assignSelectedLearnersToVehicle = (vehicleId) => {
-    setLearnerVehicleChoice(vehicleId);
-    setLearnerAssignments((current) => {
-      const next = { ...current };
-      Object.keys(selectedLearners).forEach((learnerId) => {
-        if (!selectedLearners[learnerId]) return;
-        if (vehicleId) next[learnerId] = vehicleId;
-        else delete next[learnerId];
-      });
-      return next;
-    });
-  };
-  const selectedVehicleIds = [
-    ...new Set(
-      Object.entries(learnerAssignments)
-        .filter(([childId]) => selectedLearners[childId])
-        .map(([, vehicleId]) => vehicleId)
-        .filter(Boolean),
-    ),
-  ];
+  const selectedVehicleIds = learnerVehicleChoice;
   const selectedCapacity = selectedVehicleIds.reduce(
     (sum, vehicleId) =>
       sum +
@@ -641,6 +747,13 @@ export default function Trips() {
       ),
     0,
   );
+  const minimumSeatShortfall = Math.max(
+    0,
+    Number(tripForm.minimum_learners || 0) - selectedCapacity,
+  );
+  const maximumSeatShortfall = tripForm.maximum_learners
+    ? Math.max(Number(tripForm.maximum_learners) - selectedCapacity, 0)
+    : 0;
 
   const submitTrip = async (event) => {
     event.preventDefault();
@@ -697,25 +810,23 @@ export default function Trips() {
         assignmentsByVehicle.set(vehicleId, []);
       assignmentsByVehicle.get(vehicleId).push(learner.id);
     }
-    const vehiclePayload = [...assignmentsByVehicle.entries()].map(
-      ([vehicleId, childIds]) => {
-        const prior = editingTrip?.vehicles?.find(
-          (item) => item.vehicle_id === vehicleId,
-        );
-        return {
-          vehicle_id: vehicleId,
-          driver_admin_id:
-            learnerAssignments[`__driver_${vehicleId}`] ||
-            prior?.driver_admin_id ||
-            "",
-          coordinator_admin_id:
-            learnerAssignments[`__coordinator_${vehicleId}`] ||
-            prior?.coordinator_admin_id ||
-            "",
-          child_ids: childIds,
-        };
-      },
-    );
+    const vehiclePayload = learnerVehicleChoice.map((vehicleId) => {
+      const prior = editingTrip?.vehicles?.find(
+        (item) => item.vehicle_id === vehicleId,
+      );
+      return {
+        vehicle_id: vehicleId,
+        driver_admin_id:
+          learnerAssignments[`__driver_${vehicleId}`] ??
+          prior?.driver_admin_id ??
+          "",
+        coordinator_admin_id:
+          learnerAssignments[`__coordinator_${vehicleId}`] ??
+          prior?.coordinator_admin_id ??
+          "",
+        child_ids: assignmentsByVehicle.get(vehicleId) || [],
+      };
+    });
     const saveAsDraft = !editingTrip && vehiclePayload.length === 0;
     const status = saveAsDraft ? "draft" : tripForm.status;
     const canKeepUnassignedLearners =
@@ -730,11 +841,10 @@ export default function Trips() {
       return;
     }
     const unstaffedVehicle = vehiclePayload.find(
-      (assignment) =>
-        !assignment.driver_admin_id && !assignment.coordinator_admin_id,
+      (assignment) => !assignment.driver_admin_id,
     );
     if (unstaffedVehicle) {
-      setError("Assign a driver or trip coordinator to every vehicle.");
+      setError("Assign a driver to every selected vehicle.");
       return;
     }
     if (vehiclePayload.length && selectedCount > selectedCapacity) {
@@ -867,6 +977,7 @@ export default function Trips() {
   };
 
   const updateStatus = async (trip, status) => {
+    setUpdatingTripStatuses((current) => ({ ...current, [trip.id]: true }));
     try {
       const updated = await apiRequest(`/school/trips/${trip.id}/status`, {
         method: "PATCH",
@@ -876,9 +987,17 @@ export default function Trips() {
       setTrips((current) =>
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
-      setSelectedTrip(updated);
+      setSelectedTrip((current) =>
+        current?.id === updated.id ? updated : current,
+      );
     } catch (requestError) {
       showErrorAlert(requestError.message || "Unable to update trip status.");
+    } finally {
+      setUpdatingTripStatuses((current) => {
+        const next = { ...current };
+        delete next[trip.id];
+        return next;
+      });
     }
   };
 
@@ -1048,10 +1167,6 @@ export default function Trips() {
     (selectedTrip && trips.find((item) => item.id === selectedTrip.id)) ||
     selectedTrip;
   const detailHasAssignedVehicle = (detailTrip?.vehicles || []).length > 0;
-  const detailStatuses = availableTripStatuses(
-    detailTrip?.status,
-    detailHasAssignedVehicle,
-  );
   const dateInput = (field, label, required = false) => (
     <label>
       {label}
@@ -1105,7 +1220,10 @@ export default function Trips() {
               families.
             </p>
           </div>
-          <div className="trip-heading-actions">
+          <div
+            className="trip-heading-actions"
+            style={{ display: "flex", gap: "0.5rem" }}
+          >
             <button
               type="button"
               className="trip-secondary"
@@ -1302,13 +1420,6 @@ export default function Trips() {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              className="trip-primary"
-              onClick={() => startTrip()}
-            >
-              <FiPlus /> Add trip
-            </button>
           </div>
           {loading ? (
             <div className="trip-loading">
@@ -1347,16 +1458,12 @@ export default function Trips() {
                       <th>Price</th>
                       <th>Status</th>
                       <th>Registration</th>
-                      <th>Open</th>
+                      <th>View</th>
                     </tr>
                   </thead>
                   <tbody>
                     {pageTrips.map((trip) => (
-                      <tr
-                        key={trip.id}
-                        onClick={() => setSelectedTrip(trip)}
-                        className="trip-row-clickable"
-                      >
+                      <tr key={trip.id}>
                         <td>
                           <strong>{trip.name}</strong>
                           <small>
@@ -1396,6 +1503,16 @@ export default function Trips() {
                               )}
                             </small>
                           ))}
+                          <small className="trip-table-seat-capacity">
+                            {tripSeatCapacity(trip)} seats · target{" "}
+                            {tripSeatRequirement(trip) || "Not set"}
+                          </small>
+                          {tripNeedsMoreVehicles(trip) && (
+                            <span className="trip-capacity-warning">
+                              <FiAlertCircle aria-hidden="true" /> Needs another
+                              vehicle
+                            </span>
+                          )}
                         </td>
                         <td>
                           <strong>{money(trip)}</strong>
@@ -1406,10 +1523,34 @@ export default function Trips() {
                           </small>
                         </td>
                         <td>
-                          <span
-                            className={`trip-status trip-status-${trip.status}`}
-                          >
-                            {trip.status.replaceAll("_", " ")}
+                          <span className="trip-table-status-control">
+                            <select
+                              className={`trip-table-status-select trip-status trip-status-${trip.status}`}
+                              aria-label={`Change status for ${trip.name}`}
+                              aria-busy={Boolean(updatingTripStatuses[trip.id])}
+                              value={trip.status}
+                              disabled={Boolean(updatingTripStatuses[trip.id])}
+                              onChange={(event) =>
+                                void updateStatus(trip, event.target.value)
+                              }
+                            >
+                              {availableTripStatuses(
+                                trip.status,
+                                (trip.vehicles || []).length > 0,
+                              ).map((status) => (
+                                <option key={status} value={status}>
+                                  {status.replaceAll("_", " ")}
+                                </option>
+                              ))}
+                            </select>
+                            {updatingTripStatuses[trip.id] && (
+                              <span
+                                className="trip-table-status-loading"
+                                role="status"
+                              >
+                                <FiLoader aria-hidden="true" /> Updating
+                              </span>
+                            )}
                           </span>
                         </td>
                         <td>
@@ -1422,13 +1563,12 @@ export default function Trips() {
                         <td>
                           <button
                             type="button"
-                            className="trip-open-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSelectedTrip(trip);
-                            }}
+                            className="trip-row-action"
+                            aria-label={`View details for ${trip.name}`}
+                            title="View trip details"
+                            onClick={() => setSelectedTrip(trip)}
                           >
-                            Details <FiArrowUpRight />
+                            <FiEye color="#17204d" aria-hidden="true" />
                           </button>
                         </td>
                       </tr>
@@ -1604,6 +1744,7 @@ export default function Trips() {
                 <h3>Pricing & capacity</h3>
                 <div className="trip-form-grid">
                   <label className="trip-free-toggle">
+                    Free trip
                     <input
                       type="checkbox"
                       checked={tripForm.is_free}
@@ -1614,8 +1755,7 @@ export default function Trips() {
                           price: event.target.checked ? "0" : current.price,
                         }))
                       }
-                    />{" "}
-                    Free trip
+                    />
                   </label>
                   <label>
                     Trip price (ZAR)
@@ -1643,9 +1783,16 @@ export default function Trips() {
                     Payment deadline
                     <input
                       type="date"
+                      disabled={tripForm.is_free}
                       value={tripForm.payment_deadline || ""}
                       onChange={setTripField("payment_deadline")}
                     />
+                    <small
+                      className="trip-field-hint trip-free-payment-hint"
+                      aria-hidden={!tripForm.is_free}
+                    >
+                      Not applicable for free trips.
+                    </small>
                   </label>
                   <label>
                     Minimum learners
@@ -1670,12 +1817,43 @@ export default function Trips() {
                     Payment notes
                     <textarea
                       rows="2"
+                      disabled={tripForm.is_free}
                       value={tripForm.payment_notes}
                       onChange={setTripField("payment_notes")}
                       placeholder="Payment instructions for families"
                     />
+                    <small
+                      className="trip-field-hint trip-free-payment-hint"
+                      aria-hidden={!tripForm.is_free}
+                    >
+                      Not applicable for free trips.
+                    </small>
                   </label>
                 </div>
+                {(minimumSeatShortfall > 0 || maximumSeatShortfall > 0) && (
+                  <div className="trip-capacity-warning-panel" role="status">
+                    <FiAlertCircle aria-hidden="true" />
+                    <div>
+                      <strong>Vehicle capacity is below the trip target</strong>
+                      <p>
+                        {minimumSeatShortfall > 0 && (
+                          <>
+                            Add at least {minimumSeatShortfall} seat(s) to meet
+                            the minimum learner count.{" "}
+                          </>
+                        )}
+                        {maximumSeatShortfall > 0 && (
+                          <>
+                            Add at least {maximumSeatShortfall} seat(s) to cover
+                            maximum registrations.
+                          </>
+                        )}{" "}
+                        Select another vehicle in the participating learners
+                        section.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </section>
               <section className="trip-form-section">
                 <div className="trip-section-title">
@@ -1683,23 +1861,28 @@ export default function Trips() {
                     <h3>Participating learners</h3>
                     <p>
                       {selectedCount} learners selected ·{" "}
-                      {Math.max(0, selectedCapacity - selectedCount)} assigned
-                      vehicle spaces remaining
+                      {selectedCapacity >= selectedCount
+                        ? `${selectedCapacity - selectedCount} assigned vehicle spaces remaining`
+                        : `${selectedCount - selectedCapacity} learner(s) over assigned vehicle capacity`}
                     </p>
                   </div>
                   <span>{resources.learners.length} school learners</span>
                 </div>
                 <div className="trip-learner-selectors">
                   <label>
-                    Select which students
+                    <strong> Select which students</strong>
+
+                    <small>
+                      {selectedCount
+                        ? `${selectedCount} learner${selectedCount === 1 ? "" : "s"} selected`
+                        : "Choose a grade to select its learners."}
+                    </small>
                     <select
                       value={gradeFilter}
                       onChange={(event) =>
                         selectLearnerGrade(event.target.value)
                       }
                     >
-                      <option value="all">Select a grade</option>
-
                       <option value="all">All grades</option>
                       {grades.map((grade) => (
                         <option key={grade} value={grade}>
@@ -1707,37 +1890,69 @@ export default function Trips() {
                         </option>
                       ))}
                     </select>
-                    <small>
-                      {selectedCount
-                        ? `${selectedCount} learner${selectedCount === 1 ? "" : "s"} selected`
-                        : "Choose a grade to select its learners."}
-                    </small>
                   </label>
-                  <label>
-                    Vehicle for selected students
-                    <select
-                      value={learnerVehicleChoice}
-                      disabled={!selectedCount}
-                      onChange={(event) =>
-                        assignSelectedLearnersToVehicle(event.target.value)
-                      }
-                    >
-                      <option value="">No vehicle yet</option>
-                      {resources.vehicles
-                        .filter((vehicle) =>
-                          ["available", "assigned"].includes(vehicle.status),
-                        )
-                        .map((vehicle) => (
-                          <option key={vehicle.id} value={vehicle.id}>
-                            {vehicle.name} · {vehicle.registration_number} ·{" "}
-                            {vehicle.passenger_capacity} seats
-                          </option>
-                        ))}
-                    </select>
+                  <div
+                    className="trip-vehicle-multi-select"
+                    role="group"
+                    aria-label="Vehicles for selected students"
+                  >
+                    <strong>Vehicles for selected students</strong>
                     <small>
-                      All selected learners will be assigned to this vehicle.
+                      Select one or more vehicles. Selected learners are
+                      distributed across them up to each vehicle’s capacity.
                     </small>
-                  </label>
+                    {resources.vehicles.filter(
+                      (vehicle) =>
+                        ["available", "assigned"].includes(vehicle.status) ||
+                        learnerVehicleChoice.includes(vehicle.id),
+                    ).length ? (
+                      <div className="trip-vehicle-choice-list">
+                        {resources.vehicles
+                          .filter(
+                            (vehicle) =>
+                              ["available", "assigned"].includes(
+                                vehicle.status,
+                              ) || learnerVehicleChoice.includes(vehicle.id),
+                          )
+                          .map((vehicle) => (
+                            <label key={vehicle.id}>
+                              <input
+                                type="checkbox"
+                                checked={learnerVehicleChoice.includes(
+                                  vehicle.id,
+                                )}
+                                onChange={(event) => {
+                                  const nextVehicleIds = event.target.checked
+                                    ? [...learnerVehicleChoice, vehicle.id]
+                                    : learnerVehicleChoice.filter(
+                                        (id) => id !== vehicle.id,
+                                      );
+                                  assignLearnersToVehicles(
+                                    Object.keys(selectedLearners).filter(
+                                      (learnerId) =>
+                                        selectedLearners[learnerId],
+                                    ),
+                                    nextVehicleIds,
+                                  );
+                                }}
+                              />
+                              <span>
+                                <strong>{vehicle.name}</strong>
+                                <small>
+                                  {vehicle.registration_number} ·{" "}
+                                  {vehicle.passenger_capacity} seats ·{" "}
+                                  {vehicle.status}
+                                </small>
+                              </span>
+                            </label>
+                          ))}
+                      </div>
+                    ) : (
+                      <p className="trip-vehicle-choice-empty">
+                        Add a school vehicle before assigning learners.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </section>
               <section className="trip-form-section">
@@ -1765,6 +1980,27 @@ export default function Trips() {
                     const assignment = editingTrip?.vehicles?.find(
                       (item) => item.vehicle_id === vehicleId,
                     );
+                    const selectedDriverId =
+                      learnerAssignments[`__driver_${vehicleId}`] ??
+                      assignment?.driver_admin_id ??
+                      "";
+                    const driversAssignedElsewhere = new Set(
+                      selectedVehicleIds
+                        .filter(
+                          (otherVehicleId) => otherVehicleId !== vehicleId,
+                        )
+                        .map((otherVehicleId) => {
+                          const otherAssignment = editingTrip?.vehicles?.find(
+                            (item) => item.vehicle_id === otherVehicleId,
+                          );
+                          return (
+                            learnerAssignments[`__driver_${otherVehicleId}`] ??
+                            otherAssignment?.driver_admin_id ??
+                            ""
+                          );
+                        })
+                        .filter(Boolean),
+                    );
                     return (
                       <div className="trip-assignment-card" key={vehicleId}>
                         <div>
@@ -1777,7 +2013,7 @@ export default function Trips() {
                         <label>
                           Driver
                           <select
-                            defaultValue={assignment?.driver_admin_id || ""}
+                            value={selectedDriverId}
                             onChange={(event) => {
                               const selectedId = event.target.value;
                               setLearnerAssignments((current) => ({
@@ -1788,7 +2024,14 @@ export default function Trips() {
                           >
                             <option value="">Select school staff</option>
                             {resources.staff.map((person) => (
-                              <option key={person.id} value={person.id}>
+                              <option
+                                key={person.id}
+                                value={person.id}
+                                disabled={
+                                  driversAssignedElsewhere.has(person.id) &&
+                                  person.id !== selectedDriverId
+                                }
+                              >
                                 {fullName(person)} ·{" "}
                                 {person.job_title || person.role}
                               </option>
@@ -1798,8 +2041,12 @@ export default function Trips() {
                         <label>
                           Trip coordinator (school staff)
                           <select
-                            defaultValue={
-                              assignment?.coordinator_admin_id || ""
+                            value={
+                              learnerAssignments[
+                                `__coordinator_${vehicleId}`
+                              ] ??
+                              assignment?.coordinator_admin_id ??
+                              ""
                             }
                             onChange={(event) =>
                               setLearnerAssignments((current) => ({
@@ -1833,18 +2080,6 @@ export default function Trips() {
                     )}
                     Select learners and assign them to vehicles to allocate a
                     driver or trip coordinator.{" "}
-                    <button
-                      type="button"
-                      className="trip-secondary"
-                      onClick={() => {
-                        setEditingVehicle(null);
-                        setVehicleForm(emptyVehicle);
-                        setVehicleAssets({ photos: [], documents: [] });
-                        setModal("vehicle");
-                      }}
-                    >
-                      <FiPlus /> Add school vehicle
-                    </button>
                   </div>
                 )}
               </section>
@@ -1928,7 +2163,7 @@ export default function Trips() {
             aria-modal="true"
             aria-labelledby="school-vehicle-title"
           >
-            <header>
+            <header className="trip-vehicle-modal-header">
               <div>
                 <p className="page-kicker">SCHOOL FLEET</p>
                 <h2 id="school-vehicle-title">
@@ -1937,8 +2172,8 @@ export default function Trips() {
                     : "Add school vehicle"}
                 </h2>
                 <p>
-                  This vehicle is stored under the current school, never under a
-                  transport owner.
+                  Keep your school fleet details, capacity and compliance
+                  information together.
                 </p>
               </div>
               <button
@@ -1950,181 +2185,257 @@ export default function Trips() {
                 <FiX />
               </button>
             </header>
-            <form onSubmit={submitVehicle}>
-              <div className="trip-form-grid">
-                <label>
-                  Registration number
-                  <input
-                    required
-                    value={vehicleForm.registration_number}
-                    onChange={setVehicleField("registration_number")}
-                  />
-                </label>
-                <label>
-                  Vehicle name
-                  <input
-                    required
-                    value={vehicleForm.name}
-                    onChange={setVehicleField("name")}
-                    placeholder="School Bus 01"
-                  />
-                </label>
-                <label>
-                  Vehicle type
-                  <select
-                    value={vehicleForm.vehicle_type}
-                    onChange={setVehicleField("vehicle_type")}
-                  >
-                    {["bus", "minibus", "taxi", "van", "car", "other"].map(
-                      (value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </label>
-                <label>
-                  Passenger capacity
-                  <input
-                    required
-                    type="number"
-                    min="1"
-                    value={vehicleForm.passenger_capacity}
-                    onChange={setVehicleField("passenger_capacity")}
-                  />
-                </label>
-                <label>
-                  Make
-                  <input
-                    value={vehicleForm.make}
-                    onChange={setVehicleField("make")}
-                  />
-                </label>
-                <label>
-                  Model
-                  <input
-                    value={vehicleForm.model}
-                    onChange={setVehicleField("model")}
-                  />
-                </label>
-                <label>
-                  Year
-                  <input
-                    type="number"
-                    min="1950"
-                    max="2100"
-                    value={vehicleForm.year}
-                    onChange={setVehicleField("year")}
-                  />
-                </label>
-                <label>
-                  Colour
-                  <input
-                    value={vehicleForm.colour}
-                    onChange={setVehicleField("colour")}
-                  />
-                </label>
-                <label>
-                  VIN / chassis
-                  <input
-                    value={vehicleForm.vin}
-                    onChange={setVehicleField("vin")}
-                  />
-                </label>
-                <label>
-                  License expiry
-                  <input
-                    type="date"
-                    value={vehicleForm.license_expiry}
-                    onChange={setVehicleField("license_expiry")}
-                  />
-                </label>
-                <label>
-                  Roadworthy expiry
-                  <input
-                    type="date"
-                    value={vehicleForm.roadworthy_expiry}
-                    onChange={setVehicleField("roadworthy_expiry")}
-                  />
-                </label>
-                <label>
-                  Insurance expiry
-                  <input
-                    type="date"
-                    value={vehicleForm.insurance_expiry}
-                    onChange={setVehicleField("insurance_expiry")}
-                  />
-                </label>
-                <label>
-                  Status
-                  <select
-                    value={vehicleForm.status}
-                    onChange={setVehicleField("status")}
-                  >
-                    {["available", "maintenance", "inactive"].map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="trip-form-full">
-                  Vehicle photos
-                  {editingVehicle?.photos?.length > 0 && (
-                    <span className="trip-vehicle-assets-current">
-                      {editingVehicle.photos.map((photo, index) => (
-                        <a
-                          key={photo.fileName || photo.url || index}
-                          href={photo.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Photo {index + 1}
-                        </a>
-                      ))}
+            <form className="trip-vehicle-modal-form" onSubmit={submitVehicle}>
+              <div className="trip-vehicle-form-body">
+                <section className="trip-vehicle-form-section">
+                  <div className="trip-vehicle-form-section-heading">
+                    <span className="trip-vehicle-form-icon">
+                      <FiTruck />
                     </span>
-                  )}
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    multiple
-                    onChange={(event) =>
-                      setVehicleAssets((current) => ({
-                        ...current,
-                        photos: Array.from(event.target.files || []),
-                      }))
-                    }
-                  />
-                </label>
-                <label className="trip-form-full">
-                  Vehicle documents (PDF or image)
-                  {editingVehicle?.documents?.length > 0 && (
-                    <span className="trip-vehicle-assets-current">
-                      {editingVehicle.documents.map((document, index) => (
-                        <a
-                          key={document.fileName || document.url || index}
-                          href={document.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Document {index + 1}
-                        </a>
-                      ))}
+                    <div>
+                      <h3>Vehicle identity</h3>
+                      <p>
+                        Names and registration used to identify this vehicle.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="trip-form-grid">
+                    <label>
+                      Vehicle name
+                      <input
+                        required
+                        value={vehicleForm.name}
+                        onChange={setVehicleField("name")}
+                        placeholder="e.g. School Bus 01"
+                      />
+                    </label>
+                    <label>
+                      Registration number
+                      <input
+                        required
+                        value={vehicleForm.registration_number}
+                        onChange={setVehicleField("registration_number")}
+                        placeholder="e.g. ABC 123 GP"
+                      />
+                    </label>
+                    <label>
+                      Vehicle type
+                      <select
+                        value={vehicleForm.vehicle_type}
+                        onChange={setVehicleField("vehicle_type")}
+                      >
+                        {["bus", "minibus", "taxi", "van", "car", "other"].map(
+                          (value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <label>
+                      Status
+                      <select
+                        value={vehicleForm.status}
+                        onChange={setVehicleField("status")}
+                      >
+                        {["available", "maintenance", "inactive"].map(
+                          (value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  </div>
+                </section>
+                <section className="trip-vehicle-form-section">
+                  <div className="trip-vehicle-form-section-heading">
+                    <span className="trip-vehicle-form-icon capacity">
+                      <FiUsers />
                     </span>
-                  )}
-                  <input
-                    type="file"
-                    accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
-                    multiple
-                    onChange={(event) =>
-                      setVehicleAssets((current) => ({
-                        ...current,
-                        documents: Array.from(event.target.files || []),
-                      }))
-                    }
-                  />
-                </label>
+                    <div>
+                      <h3>Specifications & capacity</h3>
+                      <p>Passenger seats are used to check trip allocations.</p>
+                    </div>
+                  </div>
+                  <div className="trip-form-grid">
+                    <label>
+                      Passenger capacity
+                      <input
+                        required
+                        type="number"
+                        min="1"
+                        value={vehicleForm.passenger_capacity}
+                        onChange={setVehicleField("passenger_capacity")}
+                      />
+                    </label>
+                    <label>
+                      Make
+                      <input
+                        value={vehicleForm.make}
+                        onChange={setVehicleField("make")}
+                        placeholder="Manufacturer"
+                      />
+                    </label>
+                    <label>
+                      Model
+                      <input
+                        value={vehicleForm.model}
+                        onChange={setVehicleField("model")}
+                        placeholder="Model name"
+                      />
+                    </label>
+                    <label>
+                      Year
+                      <input
+                        type="number"
+                        min="1950"
+                        max="2100"
+                        value={vehicleForm.year}
+                        onChange={setVehicleField("year")}
+                        placeholder="e.g. 2022"
+                      />
+                    </label>
+                    <label>
+                      Colour
+                      <input
+                        value={vehicleForm.colour}
+                        onChange={setVehicleField("colour")}
+                        placeholder="Vehicle colour"
+                      />
+                    </label>
+                    <label>
+                      VIN / chassis number
+                      <input
+                        value={vehicleForm.vin}
+                        onChange={setVehicleField("vin")}
+                        placeholder="Optional"
+                      />
+                    </label>
+                  </div>
+                </section>
+                <section className="trip-vehicle-form-section">
+                  <div className="trip-vehicle-form-section-heading">
+                    <span className="trip-vehicle-form-icon compliance">
+                      <FiCheckCircle />
+                    </span>
+                    <div>
+                      <h3>Compliance dates</h3>
+                      <p>Keep expiry dates visible for fleet readiness.</p>
+                    </div>
+                  </div>
+                  <div className="trip-form-grid">
+                    <label>
+                      License expiry
+                      <input
+                        type="date"
+                        value={vehicleForm.license_expiry}
+                        onChange={setVehicleField("license_expiry")}
+                      />
+                    </label>
+                    <label>
+                      Roadworthy expiry
+                      <input
+                        type="date"
+                        value={vehicleForm.roadworthy_expiry}
+                        onChange={setVehicleField("roadworthy_expiry")}
+                      />
+                    </label>
+                    <label>
+                      Insurance expiry
+                      <input
+                        type="date"
+                        value={vehicleForm.insurance_expiry}
+                        onChange={setVehicleField("insurance_expiry")}
+                      />
+                    </label>
+                  </div>
+                </section>
+                <section className="trip-vehicle-form-section">
+                  <div className="trip-vehicle-form-section-heading">
+                    <span className="trip-vehicle-form-icon media">
+                      <FiEye />
+                    </span>
+                    <div>
+                      <h3>Photos & documents</h3>
+                      <p>
+                        Add images and compliance documents for quick reference.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="trip-vehicle-upload-grid">
+                    <label className="trip-vehicle-upload-card">
+                      <strong>Vehicle photos</strong>
+                      <small>JPG, PNG, WebP or GIF · multiple allowed</small>
+                      {editingVehicle?.photos?.length > 0 && (
+                        <span className="trip-vehicle-assets-current">
+                          {editingVehicle.photos.map((photo, index) => (
+                            <a
+                              key={photo.fileName || photo.url || index}
+                              href={photo.url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Photo {index + 1}
+                            </a>
+                          ))}
+                        </span>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        multiple
+                        onChange={(event) =>
+                          setVehicleAssets((current) => ({
+                            ...current,
+                            photos: Array.from(event.target.files || []),
+                          }))
+                        }
+                      />
+                      {vehicleAssets.photos.length > 0 && (
+                        <small className="trip-vehicle-selected-files">
+                          {vehicleAssets.photos.length} photo(s) selected
+                        </small>
+                      )}
+                    </label>
+                    <label className="trip-vehicle-upload-card">
+                      <strong>Vehicle documents</strong>
+                      <small>PDF or image · multiple allowed</small>
+                      {editingVehicle?.documents?.length > 0 && (
+                        <span className="trip-vehicle-assets-current">
+                          {editingVehicle.documents.map((document, index) => (
+                            <a
+                              key={document.fileName || document.url || index}
+                              href={document.url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Document {index + 1}
+                            </a>
+                          ))}
+                        </span>
+                      )}
+                      <input
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+                        multiple
+                        onChange={(event) =>
+                          setVehicleAssets((current) => ({
+                            ...current,
+                            documents: Array.from(event.target.files || []),
+                          }))
+                        }
+                      />
+                      {vehicleAssets.documents.length > 0 && (
+                        <small className="trip-vehicle-selected-files">
+                          {vehicleAssets.documents.length} document(s) selected
+                        </small>
+                      )}
+                    </label>
+                  </div>
+                </section>
               </div>
               {error && (
                 <div className="trip-error" role="alert">
@@ -2162,7 +2473,7 @@ export default function Trips() {
 
       {modal === "vehicles" && (
         <div
-          className="trip-modal-backdrop"
+          className="trip-modal-backdrop trip-vehicles-backdrop"
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setModal(null);
@@ -2174,7 +2485,7 @@ export default function Trips() {
             aria-modal="true"
             aria-labelledby="school-vehicles-title"
           >
-            <header>
+            <header className="trip-vehicles-header">
               <div>
                 <p className="page-kicker">SCHOOL FLEET</p>
                 <h2 id="school-vehicles-title">School vehicles</h2>
@@ -2183,55 +2494,46 @@ export default function Trips() {
                   school-organized trips.
                 </p>
               </div>
-              <button
-                type="button"
-                className="trip-primary"
-                onClick={() => {
-                  setEditingVehicle(null);
-                  setVehicleForm(emptyVehicle);
-                  setVehicleAssets({ photos: [], documents: [] });
-                  setModal("vehicle");
-                }}
-              >
-                <FiPlus /> Add vehicle
-              </button>
+              <div className="trip-vehicles-header-actions">
+                <button
+                  type="button"
+                  className="trip-primary"
+                  onClick={() => {
+                    setEditingVehicle(null);
+                    setVehicleForm(emptyVehicle);
+                    setVehicleAssets({ photos: [], documents: [] });
+                    setModal("vehicle");
+                  }}
+                >
+                  <FiPlus /> Add vehicle
+                </button>
+                <button
+                  type="button"
+                  className="trip-modal-close"
+                  onClick={() => setModal(null)}
+                  aria-label="Close school vehicles"
+                >
+                  <FiX />
+                </button>
+              </div>
             </header>
             {resources.vehicles.length ? (
               <div className="school-vehicle-grid">
                 {resources.vehicles.map((vehicle) => (
-                  <article key={vehicle.id}>
-                    <span className="trip-vehicle-icon">
-                      <FiTruck />
-                    </span>
-                    <div>
-                      <strong>{vehicle.name}</strong>
-                      <small>
-                        {vehicle.registration_number} · {vehicle.vehicle_type}
-                      </small>
-                    </div>
-                    <b>{vehicle.passenger_capacity} seats</b>
-                    <span
-                      className={`trip-status trip-status-${vehicle.status}`}
-                    >
-                      {vehicle.status}
-                    </span>
-                    <button
-                      type="button"
-                      className="trip-secondary"
-                      onClick={() => {
-                        setEditingVehicle(vehicle);
-                        setVehicleAssets({ photos: [], documents: [] });
-                        setVehicleForm({
-                          ...emptyVehicle,
-                          ...vehicle,
-                          year: vehicle.year || "",
-                        });
-                        setModal("vehicle");
-                      }}
-                    >
-                      <FiEdit2 /> Edit
-                    </button>
-                  </article>
+                  <SchoolVehicleCard
+                    key={vehicle.id}
+                    vehicle={vehicle}
+                    onEdit={() => {
+                      setEditingVehicle(vehicle);
+                      setVehicleAssets({ photos: [], documents: [] });
+                      setVehicleForm({
+                        ...emptyVehicle,
+                        ...vehicle,
+                        year: vehicle.year || "",
+                      });
+                      setModal("vehicle");
+                    }}
+                  />
                 ))}
               </div>
             ) : (
@@ -2303,19 +2605,6 @@ export default function Trips() {
                 >
                   <FiEdit2 /> Edit trip
                 </button>
-                <select
-                  aria-label="Update trip lifecycle"
-                  value={detailTrip.status}
-                  onChange={(event) =>
-                    void updateStatus(detailTrip, event.target.value)
-                  }
-                >
-                  {detailStatuses.map((status) => (
-                    <option key={status} value={status}>
-                      {status.replaceAll("_", " ")}
-                    </option>
-                  ))}
-                </select>
                 {!detailHasAssignedVehicle && (
                   <small className="trip-detail-status-note">
                     Without a vehicle, only draft or preparing is available.

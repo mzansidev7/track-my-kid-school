@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiAlertCircle,
   FiArrowUp,
@@ -13,92 +13,189 @@ import {
   FiUsers,
 } from "react-icons/fi";
 import { FaBus } from "react-icons/fa";
+import { apiRequest } from "../api";
+import { supabaseClient } from "../supabaseClient";
 import "../styles/routes.css";
 
-const routes = [
-  {
-    name: "Brooklyn to School",
-    id: "RT-001",
-    code: "Route 1",
-    stops: 8,
-    students: 28,
-    vehicle: "GP 45 CD GP",
-    driver: "John Mokoena",
-    time: "06:30 AM - 08:00 AM",
-    status: "Active",
-    tone: "purple",
-  },
-  {
-    name: "Arcadia to School",
-    id: "RT-002",
-    code: "Route 2",
-    stops: 6,
-    students: 24,
-    vehicle: "GP 78 EF GP",
-    driver: "Sarah Jacobs",
-    time: "06:45 AM - 08:10 AM",
-    status: "Active",
-    tone: "blue",
-  },
-  {
-    name: "Hatfield to School",
-    id: "RT-003",
-    code: "Route 3",
-    stops: 9,
-    students: 32,
-    vehicle: "GP 12 AB GP",
-    driver: "Thabo Nkosi",
-    time: "07:00 AM - 08:20 AM",
-    status: "Active",
-    tone: "green",
-  },
-  {
-    name: "Sunnyside to School",
-    id: "RT-004",
-    code: "Route 4",
-    stops: 7,
-    students: 31,
-    vehicle: "GP 91 GH GP",
-    driver: "Mike Williams",
-    time: "07:15 AM - 08:30 AM",
-    status: "Inactive",
-    tone: "orange",
-  },
-  {
-    name: "Brooklyn Afternoon",
-    id: "RT-005",
-    code: "Route 5",
-    stops: 8,
-    students: 26,
-    vehicle: "GP 63 IJ GP",
-    driver: "James Dlamini",
-    time: "02:30 PM - 04:00 PM",
-    status: "Active",
-    tone: "pink",
-  },
-  {
-    name: "Menlo Park Route",
-    id: "RT-006",
-    code: "Route 6",
-    stops: 5,
-    students: 19,
-    vehicle: "Not assigned",
-    driver: "Not assigned",
-    time: "03:00 PM - 04:20 PM",
-    status: "Draft",
-    tone: "gray",
-  },
-];
-
 const tabs = ["All routes", "Active", "Inactive", "Draft"];
+const cacheTtl = 5 * 60 * 1000;
+
+const getAuth = () => {
+  try {
+    return JSON.parse(localStorage.getItem("schoolAuth") || "{}");
+  } catch {
+    return {};
+  }
+};
 
 function Routes() {
+  const auth = getAuth();
+  const cacheKey = `schoolRoutesCache:${auth.user?.id || "current"}`;
+
+  const normalizeRoute = useCallback((route, index) => {
+    const assignments = Array.isArray(route.assignments)
+      ? route.assignments
+      : [];
+    const activeAssignment =
+      assignments.find((item) => item.is_active !== false) ||
+      assignments[0] ||
+      null;
+    const driverName =
+      activeAssignment?.drivers?.users?.name ||
+      activeAssignment?.driver_id ||
+      "Not assigned";
+    const vehicleName =
+      activeAssignment?.vehicles?.registration_number ||
+      activeAssignment?.vehicles?.make ||
+      (activeAssignment?.vehicle_id ? "Assigned vehicle" : "Not assigned");
+    const status =
+      assignments.length === 0
+        ? "Draft"
+        : activeAssignment?.is_active === false
+          ? "Inactive"
+          : "Active";
+
+    return {
+      ...route,
+      id: route.id || `route-${index}`,
+      code: `Route ${index + 1}`,
+      name: route.route_name || `Route ${index + 1}`,
+      driver: driverName,
+      vehicle: vehicleName,
+      students: route.students || 0,
+      stops: route.stop_count || 0,
+      start: route.start_location || "Route start",
+      end: route.end_location || "Route end",
+      time: route.departure_time
+        ? new Date(route.departure_time).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "Not scheduled",
+      status,
+      tone:
+        status === "Draft"
+          ? "gray"
+          : status === "Inactive"
+            ? "orange"
+            : "purple",
+    };
+  }, []);
+
+  const [routeData, setRouteData] = useState(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      return Array.isArray(cached?.data?.routes)
+        ? cached.data.routes.map((route, index) => normalizeRoute(route, index))
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  const [school, setSchool] = useState(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      return cached?.data?.school || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const loadRoutes = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+        if (
+          !forceRefresh &&
+          cached?.data &&
+          Date.now() - cached.timestamp < cacheTtl
+        ) {
+          const nextRoutes = Array.isArray(cached.data.routes)
+            ? cached.data.routes.map((route, index) =>
+                normalizeRoute(route, index),
+              )
+            : [];
+          setRouteData(nextRoutes);
+          setSchool(cached.data.school || null);
+          return;
+        }
+
+        const dashboard = await apiRequest("/school/dashboard", {
+          headers: { Authorization: `Bearer ${auth.token || ""}` },
+        });
+
+        const nextRoutes = Array.isArray(dashboard.routes)
+          ? dashboard.routes.map((route, index) => normalizeRoute(route, index))
+          : [];
+
+        localStorage.setItem(
+          cacheKey,
+          JSON.stringify({ data: dashboard, timestamp: Date.now() }),
+        );
+        setSchool(dashboard.school || null);
+        setRouteData(nextRoutes);
+      } catch {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+        if (cached?.data) {
+          const nextRoutes = Array.isArray(cached.data.routes)
+            ? cached.data.routes.map((route, index) =>
+                normalizeRoute(route, index),
+              )
+            : [];
+          setRouteData(nextRoutes);
+          setSchool(cached.data.school || null);
+        }
+      }
+    },
+    [auth.token, cacheKey, normalizeRoute],
+  );
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => void loadRoutes(), 0);
+    return () => window.clearTimeout(timeout);
+  }, [loadRoutes]);
+
+  useEffect(() => {
+    if (!supabaseClient) return undefined;
+
+    const channel = supabaseClient
+      .channel(`school-routes-live:${auth.user?.id || "current"}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "routes" },
+        () => void loadRoutes(true),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "route_children" },
+        () => void loadRoutes(true),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "route_assignments" },
+        () => void loadRoutes(true),
+      )
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  }, [auth.user?.id, loadRoutes]);
+
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("All routes");
-  const [selectedRoute, setSelectedRoute] = useState(routes[0]);
+  const [selectedRouteId, setSelectedRouteId] = useState(null);
+
+  const selectedRoute = useMemo(() => {
+    if (!routeData.length) return null;
+    return (
+      routeData.find((route) => route.id === selectedRouteId) ?? routeData[0]
+    );
+  }, [routeData, selectedRouteId]);
+
   const filteredRoutes = useMemo(
     () =>
-      routes.filter(
+      routeData.filter(
         (route) =>
           `${route.name} ${route.code} ${route.driver} ${route.vehicle}`
             .toLowerCase()
@@ -106,8 +203,16 @@ function Routes() {
           (tab === "All routes" ||
             route.status.toLowerCase() === tab.toLowerCase()),
       ),
-    [query, tab],
+    [query, routeData, tab],
   );
+
+  const totalStudents = routeData.reduce(
+    (sum, route) => sum + Number(route.students || 0),
+    0,
+  );
+  const activeRouteCount = routeData.filter(
+    (route) => route.status === "Active",
+  ).length;
 
   return (
     <>
@@ -129,7 +234,7 @@ function Routes() {
           <div className="top-profile">
             <img src="https://i.pravatar.cc/100?img=5" alt="School admin" />
             <span>
-              <strong>School Admin</strong>
+              <strong>{school?.name || "School Admin"}</strong>
               <small>Administrator</small>
             </span>
             <b>⌄</b>
@@ -159,9 +264,9 @@ function Routes() {
             </span>
             <div>
               <small>Total routes</small>
-              <strong>14</strong>
+              <strong>{routeData.length}</strong>
               <em>
-                <FiArrowUp /> 2 this month
+                <FiArrowUp /> Live from school data
               </em>
             </div>
           </article>
@@ -171,8 +276,13 @@ function Routes() {
             </span>
             <div>
               <small>Active routes</small>
-              <strong>11</strong>
-              <em>78.6% of routes</em>
+              <strong>{activeRouteCount}</strong>
+              <em>
+                {routeData.length
+                  ? Math.round((activeRouteCount / routeData.length) * 100)
+                  : 0}
+                % of routes
+              </em>
             </div>
           </article>
           <article>
@@ -181,7 +291,7 @@ function Routes() {
             </span>
             <div>
               <small>Students covered</small>
-              <strong>312</strong>
+              <strong>{totalStudents}</strong>
               <em>Across all routes</em>
             </div>
           </article>
@@ -191,8 +301,12 @@ function Routes() {
             </span>
             <div>
               <small>Average duration</small>
-              <strong>1h 15m</strong>
-              <em>Morning routes</em>
+              <strong>Live data</strong>
+              <em>
+                {routeData.length
+                  ? "Updated in real time"
+                  : "Waiting for routes"}
+              </em>
             </div>
           </article>
         </section>
@@ -235,9 +349,9 @@ function Routes() {
               </div>
               {filteredRoutes.map((route) => (
                 <button
-                  className={`route-card ${selectedRoute.id === route.id ? "selected" : ""}`}
+                  className={`route-card ${selectedRoute?.id === route.id ? "selected" : ""}`}
                   key={route.id}
-                  onClick={() => setSelectedRoute(route)}
+                  onClick={() => setSelectedRouteId(route.id)}
                 >
                   <span className={`route-card-icon ${route.tone}`}>
                     <strong>{route.code.replace("Route ", "R")}</strong>
@@ -247,8 +361,8 @@ function Routes() {
                     <small>{route.name}</small>
                   </div>
                   <div className="route-card-direction">
-                    <strong>{route.name.split(" to ")[0]}</strong>
-                    <small>→ ABC Primary School</small>
+                    <strong>{route.start}</strong>
+                    <small>→ {route.end}</small>
                   </div>
                   <span className="route-stat">
                     <FiUsers /> {route.students}
@@ -258,7 +372,7 @@ function Routes() {
                   </span>
                   <div className="route-card-assignment">
                     <strong>{route.vehicle}</strong>
-                    <small>Toyota Quantum</small>
+                    <small>{route.driver}</small>
                   </div>
                   <span
                     className={`route-status ${route.status.toLowerCase()}`}
@@ -274,7 +388,10 @@ function Routes() {
               <div className="empty-routes">No routes match your search.</div>
             )}
             <div className="routes-footer">
-              <span>Showing 1 to {filteredRoutes.length} of 14 routes</span>
+              <span>
+                Showing {filteredRoutes.length ? 1 : 0} to{" "}
+                {filteredRoutes.length} of {routeData.length} routes
+              </span>
               <div>
                 <button disabled>‹</button>
                 <button className="current-page">1</button>
@@ -284,70 +401,86 @@ function Routes() {
               </div>
             </div>
           </div>
-          <aside className="route-detail">
-            <div className="route-detail-head">
-              <div>
-                <h2>Route overview</h2>
-                <small>
-                  {selectedRoute.code} · {selectedRoute.id}
-                </small>
+          {selectedRoute && (
+            <aside className="route-detail">
+              <div className="route-detail-head">
+                <div>
+                  <h2>Route overview</h2>
+                  <small>
+                    {selectedRoute.code} · {selectedRoute.id}
+                  </small>
+                </div>
+                <button aria-label="More options">•••</button>
               </div>
-              <button aria-label="More options">•••</button>
-            </div>
-            <div className="route-preview">
-              <div className="route-preview-line" />
-              <span className="preview-stop one">
-                <i />
-                School
-              </span>
-              <span className="preview-stop two">
-                <i />
-                Brooklyn
-              </span>
-              <span className="preview-stop three">
-                <i />
-                Arcadia
-              </span>
-              <span className="preview-stop four">
-                <i />
-                Hatfield
-              </span>
-              <FaBus />
-            </div>
-            <div className="route-detail-body">
-              <span className="route-status active">
-                {selectedRoute.status}
-              </span>
-              <h3>{selectedRoute.name}</h3>
-              <p>Morning route · Monday to Friday</p>
-              <dl>
-                <dt>Stops</dt>
-                <dd>{selectedRoute.stops}</dd>
-                <dt>Students</dt>
-                <dd>{selectedRoute.students}</dd>
-                <dt>Duration</dt>
-                <dd>1h 30m</dd>
-                <dt>Distance</dt>
-                <dd>12.4 km</dd>
-              </dl>
-              <div className="assigned-route">
-                <h4>Assigned vehicle</h4>
-                <p>
-                  <FaBus /> <strong>{selectedRoute.vehicle}</strong>
-                </p>
-                <small>Toyota Quantum · 16 seats</small>
-                <h4>Assigned driver</h4>
-                <p>
-                  <span className="driver-avatar">JM</span>
-                  <strong>{selectedRoute.driver}</strong>
-                </p>
-                <small>Driver rating · ★ 4.8</small>
+              <div className="route-preview">
+                <div className="route-preview-line" />
+                <span className="preview-stop one">
+                  <i />
+                  School
+                </span>
+                <span className="preview-stop two">
+                  <i />
+                  {selectedRoute.start}
+                </span>
+                <span className="preview-stop three">
+                  <i />
+                  {selectedRoute.end}
+                </span>
+                <span className="preview-stop four">
+                  <i />
+                  Route
+                </span>
+                <FaBus />
               </div>
-              <button className="edit-route">
-                <FiEdit2 /> Edit route
-              </button>
-            </div>
-          </aside>
+              <div className="route-detail-body">
+                <span
+                  className={`route-status ${selectedRoute.status.toLowerCase()}`}
+                >
+                  {selectedRoute.status}
+                </span>
+                <h3>{selectedRoute.name}</h3>
+                <p>{selectedRoute.time} · Monday to Friday</p>
+                <dl>
+                  <dt>Stops</dt>
+                  <dd>{selectedRoute.stops}</dd>
+                  <dt>Students</dt>
+                  <dd>{selectedRoute.students}</dd>
+                  <dt>Duration</dt>
+                  <dd>{selectedRoute.time || "Not scheduled"}</dd>
+                  <dt>Distance</dt>
+                  <dd>
+                    {selectedRoute.start && selectedRoute.end
+                      ? "Live route"
+                      : "Not set"}
+                  </dd>
+                </dl>
+                <div className="assigned-route">
+                  <h4>Assigned vehicle</h4>
+                  <p>
+                    <FaBus /> <strong>{selectedRoute.vehicle}</strong>
+                  </p>
+                  <small>
+                    {selectedRoute.start} → {selectedRoute.end}
+                  </small>
+                  <h4>Assigned driver</h4>
+                  <p>
+                    <span className="driver-avatar">
+                      {selectedRoute.driver?.charAt(0)?.toUpperCase() || "N"}
+                    </span>
+                    <strong>{selectedRoute.driver}</strong>
+                  </p>
+                  <small>
+                    {selectedRoute.status === "Active"
+                      ? "Route active"
+                      : "Awaiting assignment"}
+                  </small>
+                </div>
+                <button className="edit-route">
+                  <FiEdit2 /> Edit route
+                </button>
+              </div>
+            </aside>
+          )}
         </section>
       </div>
     </>
