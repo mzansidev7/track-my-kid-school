@@ -7,6 +7,7 @@ import {
   FiClock,
   FiMapPin,
   FiMail,
+  FiMessageSquare,
   FiSearch,
   FiTruck,
   FiUser,
@@ -15,6 +16,7 @@ import {
 } from "react-icons/fi";
 import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
+import { useNavigate } from "react-router-dom";
 import "../styles/notifications.css";
 
 const tabs = [
@@ -54,6 +56,8 @@ const toViewModel = (notification) => ({
   ...notification,
   text: notification.message,
   unread: notification.is_read !== true,
+  isSupportReply: Boolean(notification.support_ticket_id) ||
+    notification.title?.startsWith("Support replied:"),
   time: notification.created_at
     ? new Date(notification.created_at).toLocaleString()
     : "Just now",
@@ -61,6 +65,7 @@ const toViewModel = (notification) => ({
 });
 
 function Notifications() {
+  const navigate = useNavigate();
   const auth = JSON.parse(localStorage.getItem("schoolAuth") || "{}");
   const cacheKey = `schoolNotificationsCache:${auth.user?.id || "current"}`;
   const [query, setQuery] = useState("");
@@ -545,6 +550,21 @@ function Notifications() {
                       <FiUsers /> Received <strong>{selected.time}</strong>
                     </p>
                   </div>
+                  {selected.isSupportReply && (
+                    <button
+                      className="mark-read"
+                      onClick={() =>
+                        navigate(
+                          selected.support_ticket_id
+                            ? `/support?ticket=${encodeURIComponent(selected.support_ticket_id)}`
+                            : "/support",
+                        )
+                      }
+                      type="button"
+                    >
+                      <FiMessageSquare /> Open support conversation
+                    </button>
+                  )}
                   <small className="detail-time">{selected.time}</small>
                 </div>
               </>

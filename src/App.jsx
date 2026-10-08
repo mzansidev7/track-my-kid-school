@@ -15,14 +15,20 @@ import Reports from "./pages/Reports";
 import LiveTracking from "./pages/LiveTracking.jsx";
 import "./styles/liveTracking.css";
 import Incidents from "./pages/Incidents";
+import SupportTickets from "./pages/SupportTickets";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Members from "./pages/Members";
+import Billing from "./pages/Billing";
 import Messages from "./pages/Messages";
 import PortalLayout from "./components/PortalLayout";
 import { apiRequest } from "./api";
-import { canAccessPath } from "./accessControl";
+import {
+  canAccessDuringExpiredTrial,
+  canAccessPath,
+  isSchoolTrialExpiredWithoutPaidSubscription,
+} from "./accessControl";
 
 const requiredSchoolFields = [
   "name",
@@ -111,6 +117,8 @@ function ProtectedRoute({ children }) {
   });
   const [school, setSchool] = useState(initialProfile.data);
   const [profileLoading, setProfileLoading] = useState(!initialProfile.isFresh);
+  const [billingAccessLoading, setBillingAccessLoading] = useState(isSchoolSession);
+  const [trialExpired, setTrialExpired] = useState(false);
 
   useEffect(() => {
     const handleProfileUpdate = (event) => {
@@ -161,11 +169,36 @@ function ProtectedRoute({ children }) {
     return undefined;
   }, [auth.token, auth.user?.id, initialProfile, isSchoolSession]);
 
+  useEffect(() => {
+    if (!isSchoolSession) return undefined;
+
+    let active = true;
+    apiRequest("/school/billing", {
+      headers: { Authorization: `Bearer ${auth.token}` },
+    })
+      .then((billing) => {
+        if (active) {
+          setTrialExpired(isSchoolTrialExpiredWithoutPaidSubscription(billing));
+        }
+      })
+      .catch((billingError) => {
+        console.error("Could not check school billing access:", billingError);
+        if (active) setTrialExpired(false);
+      })
+      .finally(() => {
+        if (active) setBillingAccessLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [auth.token, isSchoolSession, location.pathname]);
+
   if (!isSchoolSession) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-  if (profileLoading) {
+  if (profileLoading || billingAccessLoading) {
     return (
       <main
         role="status"
@@ -186,12 +219,24 @@ function ProtectedRoute({ children }) {
     school?.admin_profile?.access_level ||
     auth?.user?.admin_profile?.access_level ||
     auth?.admin_profile?.access_level;
-  if (!canAccessPath(accessLevel, location.pathname)) {
+  const expiredTrialBillingAccess =
+    trialExpired && canAccessDuringExpiredTrial(location.pathname);
+  if (
+    trialExpired &&
+    !expiredTrialBillingAccess
+  ) {
+    return <Navigate to="/billing" replace state={{ trialExpired: true }} />;
+  }
+  if (
+    !expiredTrialBillingAccess &&
+    !canAccessPath(accessLevel, location.pathname)
+  ) {
     return <Navigate to="/settings" replace />;
   }
 
   if (
     location.pathname !== "/settings" &&
+    !expiredTrialBillingAccess &&
     (!hasCompleteSchoolData(school) || !hasCompleteAdminData(school, auth))
   ) {
     return <Navigate to="/settings" replace />;
@@ -304,6 +349,14 @@ export default function App() {
         }
       />
       <Route
+        path="/support"
+        element={
+          <ProtectedRoute>
+            <SupportTickets />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/reports"
         element={
           <ProtectedRoute>
@@ -332,6 +385,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Members />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing"
+        element={
+          <ProtectedRoute>
+            <Billing />
           </ProtectedRoute>
         }
       />

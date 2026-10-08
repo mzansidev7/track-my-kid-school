@@ -2,8 +2,10 @@ import {
   FiActivity,
   FiAlertTriangle,
   FiBell,
+  FiCreditCard,
   FiFileText,
   FiHome,
+  FiLifeBuoy,
   FiMap,
   FiMapPin,
   FiMessageSquare,
@@ -19,7 +21,11 @@ import { NavLink } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest } from "../../api";
 import { supabaseClient } from "../../supabaseClient";
-import { canAccessPath } from "../../accessControl";
+import {
+  canAccessDuringExpiredTrial,
+  canAccessPath,
+  isSchoolTrialExpiredWithoutPaidSubscription,
+} from "../../accessControl";
 import logo from "../../assets/images/logo.png";
 import "../../styles/sidebar.css";
 
@@ -49,9 +55,15 @@ const menuItems = [
     icon: <FiBell />,
     path: "/notifications",
   },
+  {
+    title: "Support Tickets",
+    icon: <FiLifeBuoy />,
+    path: "/support",
+  },
   { title: "Reports ✓", icon: <FiFileText />, path: "/reports" },
   { title: "Incidents ✓", icon: <FiAlertTriangle />, path: "/incidents" },
   { title: "Settings ✓", icon: <FiSettings />, path: "/settings" },
+  { title: "Subscription & Billing", icon: <FiCreditCard />, path: "/billing" },
 ];
 
 function readSession() {
@@ -145,6 +157,8 @@ export default function Sidebar() {
   const session = readSession();
   const [admin, setAdmin] = useState(() => readCachedAdmin(session));
   const [school, setSchool] = useState(() => readCachedSchool(session));
+  const [billingAccessLoading, setBillingAccessLoading] = useState(true);
+  const [trialExpired, setTrialExpired] = useState(false);
   const userId = session.user?.id;
   const notificationCacheKey = `schoolUnreadNotifications:${userId || "current"}`;
   const messageCacheKey = `schoolUnreadMessages:${userId || "current"}`;
@@ -271,6 +285,29 @@ export default function Sidebar() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    apiRequest("/school/billing", {
+      headers: { Authorization: `Bearer ${session.token || ""}` },
+    })
+      .then((billing) => {
+        if (active) {
+          setTrialExpired(isSchoolTrialExpiredWithoutPaidSubscription(billing));
+        }
+      })
+      .catch((billingError) => {
+        console.error("Could not check school billing navigation:", billingError);
+        if (active) setTrialExpired(false);
+      })
+      .finally(() => {
+        if (active) setBillingAccessLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [session.token]);
+
+  useEffect(() => {
     const auth = readSession();
 
     const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
@@ -337,11 +374,13 @@ export default function Sidebar() {
   const schoolDataComplete = hasCompleteSchoolData(school);
   const adminDataComplete = hasCompleteAdminData(admin);
   const profileIncomplete = !schoolDataComplete || !adminDataComplete;
-  const visibleMenuItems = menuItems.filter(({ path }) =>
-    profileIncomplete
+  const visibleMenuItems = menuItems.filter(({ path }) => {
+    if (billingAccessLoading) return canAccessDuringExpiredTrial(path);
+    if (trialExpired) return canAccessDuringExpiredTrial(path);
+    return profileIncomplete
       ? path === "/settings"
-      : canAccessPath(admin?.access_level, path),
-  );
+      : canAccessPath(admin?.access_level, path);
+  });
 
   return (
     <aside className="portal-sidebar">
@@ -386,6 +425,7 @@ export default function Sidebar() {
       </nav>
       {schoolDataComplete &&
         adminDataComplete &&
+        (!trialExpired || canAccessDuringExpiredTrial("/tracking")) &&
         canAccessPath(admin?.access_level, "/tracking") && (
           <>
             <span className="sidebar-section-label">Live Tracking</span>

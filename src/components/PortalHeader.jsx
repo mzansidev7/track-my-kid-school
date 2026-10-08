@@ -20,6 +20,7 @@ const pageNames = {
   "/reports": "Reports",
   "/incidents": "Incidents",
   "/settings": "Settings",
+  "/billing": "Subscription & Billing",
 };
 
 function readSession() {

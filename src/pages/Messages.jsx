@@ -51,10 +51,29 @@ function formatTime(value) {
     : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function getRoleLabel(role) {
-  if (role === "client") return "Parent";
-  if (role === "driver") return "Driver";
-  if (role === "owner") return "Fleet owner";
+function sortByLastMessage(conversations) {
+  return [...conversations].sort((first, second) => {
+    const getTimestamp = (conversation) => {
+      const value =
+        conversation?.last_message?.sent_at ||
+        conversation?.last_message_at ||
+        conversation?.created_at;
+      const timestamp = value ? new Date(value).getTime() : 0;
+      return Number.isFinite(timestamp) ? timestamp : 0;
+    };
+    return getTimestamp(second) - getTimestamp(first);
+  });
+}
+
+function isSupportParticipant(person) {
+  return person?.is_support === true || person?.name === "Support team";
+}
+
+function getRoleLabel(person) {
+  if (isSupportParticipant(person)) return "Support team";
+  if (person?.role === "client") return "Parent";
+  if (person?.role === "driver") return "Driver";
+  if (person?.role === "owner") return "Fleet owner";
   return "Staff";
 }
 
@@ -76,6 +95,7 @@ function getStaffUserId(member) {
 }
 
 function getPersonName(person) {
+  if (isSupportParticipant(person)) return "Support team";
   const linkedUser = person?.users || person?.user || {};
   const primaryAdmin = person?.primary_admin || {};
   const personalName = (source) =>
@@ -84,6 +104,7 @@ function getPersonName(person) {
   return (
     primaryAdmin.name ||
     personalName(primaryAdmin) ||
+    person?.name ||
     personalName(person) ||
     personalName(linkedUser) ||
     person?.full_name ||
@@ -92,7 +113,6 @@ function getPersonName(person) {
     linkedUser?.display_name ||
     person?.email ||
     linkedUser?.email ||
-    person?.name ||
     "Staff member"
   );
 }
@@ -116,7 +136,7 @@ function Messages() {
   const conversationsCacheKey = `schoolConversationsCache:${auth.user?.id || "current"}`;
   const messagesCachePrefix = `schoolMessagesCache:${auth.user?.id || "current"}`;
   const [conversations, setConversations] = useState(() =>
-    readCache(conversationsCacheKey, []),
+    sortByLastMessage(readCache(conversationsCacheKey, [])),
   );
 
   const [selectedConversation, setSelectedConversation] = useState(null);
@@ -140,7 +160,7 @@ function Messages() {
       const data = await apiRequest("/school/conversations", {
         headers: { Authorization: `Bearer ${auth.token || ""}` },
       });
-      const next = Array.isArray(data) ? data : [];
+      const next = sortByLastMessage(Array.isArray(data) ? data : []);
       localStorage.setItem(
         conversationsCacheKey,
         JSON.stringify({ data: next, timestamp: Date.now() }),
@@ -226,7 +246,9 @@ function Messages() {
         headers: { Authorization: `Bearer ${auth.token || ""}` },
       });
 
-      const next = conversations.filter((item) => item.id !== conversation.id);
+      const next = sortByLastMessage(
+        conversations.filter((item) => item.id !== conversation.id),
+      );
       setConversations(next);
       localStorage.setItem(
         conversationsCacheKey,
@@ -303,12 +325,14 @@ function Messages() {
   const filteredConversations = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return conversations.filter((conversation) => {
+    return sortByLastMessage(conversations).filter((conversation) => {
       const participant = conversation.other_participant || {};
 
       if (isCurrentUserParticipant(participant, auth.user?.id)) return false;
 
-      const role = getRoleLabel(participant.role);
+      const role = isSupportParticipant(participant)
+        ? "Staff"
+        : getRoleLabel(participant);
       const matchesTab = activeTab === "All" || role === roleByTab[activeTab];
       const matchesSearch =
         !query || getPersonName(participant).toLowerCase().includes(query);
@@ -505,7 +529,7 @@ function Messages() {
                           {lastMessage.content || "Start a conversation"}
                         </span>
                         <span className="conversation-role">
-                          {getRoleLabel(participant.role)}
+                          {getRoleLabel(participant)}
                         </span>
                       </span>
                       {unreadCount > 0 && (
@@ -569,7 +593,7 @@ function Messages() {
                     {getPersonName(selectedConversation.other_participant)}
                   </h2>
                   <p>
-                    {getRoleLabel(selectedConversation.other_participant?.role)}
+                    {getRoleLabel(selectedConversation.other_participant)}
                   </p>
                 </div>
                 <div className="chat-actions">
