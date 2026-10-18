@@ -85,10 +85,24 @@ function hasCompleteAdminData(school, auth) {
 
 function readCachedSchool(auth) {
   try {
-    const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
+    const cacheKey = `schoolProfileCache:${auth?.user?.id || "current"}`;
     return JSON.parse(localStorage.getItem(cacheKey) || "null");
   } catch {
     return null;
+  }
+}
+
+function readCachedBilling(auth) {
+  try {
+    const cacheKey = `schoolBillingCache:${auth?.user?.id || "current"}`;
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+    const isFresh =
+      cached?.data &&
+      cached?.timestamp &&
+      Date.now() - cached.timestamp < 5 * 60 * 1000;
+    return { data: isFresh ? cached.data : null, isFresh: Boolean(isFresh) };
+  } catch {
+    return { data: null, isFresh: false };
   }
 }
 
@@ -102,7 +116,10 @@ function ProtectedRoute({ children }) {
     localStorage.removeItem("schoolAuth");
   }
 
-  const isSchoolSession = Boolean(auth?.token) && auth?.user?.role === "school";
+  const authToken = auth?.token || "";
+  const authUserId = auth?.user?.id || "";
+  const isSchoolSession = Boolean(authToken) && auth?.user?.role === "school";
+  const [initialBilling] = useState(() => readCachedBilling(auth));
   const [initialProfile] = useState(() => {
     const cachedProfile = readCachedSchool(auth);
     const cacheIsFresh =
@@ -117,8 +134,12 @@ function ProtectedRoute({ children }) {
   });
   const [school, setSchool] = useState(initialProfile.data);
   const [profileLoading, setProfileLoading] = useState(!initialProfile.isFresh);
-  const [billingAccessLoading, setBillingAccessLoading] = useState(isSchoolSession);
-  const [trialExpired, setTrialExpired] = useState(false);
+  const [billingAccessLoading, setBillingAccessLoading] = useState(
+    isSchoolSession && !initialBilling.isFresh,
+  );
+  const [trialExpired, setTrialExpired] = useState(() =>
+    isSchoolTrialExpiredWithoutPaidSubscription(initialBilling.data),
+  );
 
   useEffect(() => {
     const handleProfileUpdate = (event) => {
@@ -152,9 +173,9 @@ function ProtectedRoute({ children }) {
   useEffect(() => {
     if (!isSchoolSession || initialProfile.isFresh) return undefined;
 
-    const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
+    const cacheKey = `schoolProfileCache:${authUserId || "current"}`;
     apiRequest("/school/profile", {
-      headers: { Authorization: `Bearer ${auth.token || ""}` },
+      headers: { Authorization: `Bearer ${authToken}` },
     })
       .then((profile) => {
         setSchool(profile);
@@ -167,17 +188,21 @@ function ProtectedRoute({ children }) {
       .finally(() => setProfileLoading(false));
 
     return undefined;
-  }, [auth.token, auth.user?.id, initialProfile, isSchoolSession]);
+  }, [authToken, authUserId, initialProfile, isSchoolSession]);
 
   useEffect(() => {
     if (!isSchoolSession) return undefined;
 
     let active = true;
     apiRequest("/school/billing", {
-      headers: { Authorization: `Bearer ${auth.token}` },
+      headers: { Authorization: `Bearer ${authToken}` },
     })
       .then((billing) => {
         if (active) {
+          localStorage.setItem(
+            `schoolBillingCache:${authUserId || "current"}`,
+            JSON.stringify({ data: billing, timestamp: Date.now() }),
+          );
           setTrialExpired(isSchoolTrialExpiredWithoutPaidSubscription(billing));
         }
       })
@@ -192,13 +217,19 @@ function ProtectedRoute({ children }) {
     return () => {
       active = false;
     };
-  }, [auth.token, isSchoolSession, location.pathname]);
+  }, [authToken, authUserId, isSchoolSession, location.pathname]);
 
   if (!isSchoolSession) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-  if (profileLoading || billingAccessLoading) {
+  const allowTripsWhileAccessDataLoads =
+    location.pathname === "/trips" &&
+    (profileLoading || billingAccessLoading);
+  if (
+    (profileLoading || billingAccessLoading) &&
+    !allowTripsWhileAccessDataLoads
+  ) {
     return (
       <main
         role="status"
@@ -235,6 +266,7 @@ function ProtectedRoute({ children }) {
   }
 
   if (
+    !profileLoading &&
     location.pathname !== "/settings" &&
     !expiredTrialBillingAccess &&
     (!hasCompleteSchoolData(school) || !hasCompleteAdminData(school, auth))

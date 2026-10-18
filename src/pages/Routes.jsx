@@ -19,6 +19,7 @@ import "../styles/routes.css";
 
 const tabs = ["All routes", "Active", "Inactive", "Draft"];
 const cacheTtl = 5 * 60 * 1000;
+const pageSize = 6;
 
 const getAuth = () => {
   try {
@@ -184,14 +185,8 @@ function Routes() {
 
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("All routes");
+  const [page, setPage] = useState(1);
   const [selectedRouteId, setSelectedRouteId] = useState(null);
-
-  const selectedRoute = useMemo(() => {
-    if (!routeData.length) return null;
-    return (
-      routeData.find((route) => route.id === selectedRouteId) ?? routeData[0]
-    );
-  }, [routeData, selectedRouteId]);
 
   const filteredRoutes = useMemo(
     () =>
@@ -205,6 +200,19 @@ function Routes() {
       ),
     [query, routeData, tab],
   );
+  const pageCount = Math.max(1, Math.ceil(filteredRoutes.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const visibleRoutes = filteredRoutes.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
+  );
+  const selectedRoute = useMemo(() => {
+    if (!filteredRoutes.length) return null;
+    return (
+      filteredRoutes.find((route) => route.id === selectedRouteId) ??
+      visibleRoutes[0]
+    );
+  }, [filteredRoutes, selectedRouteId, visibleRoutes]);
 
   const totalStudents = routeData.reduce(
     (sum, route) => sum + Number(route.students || 0),
@@ -317,7 +325,10 @@ function Routes() {
                 <button
                   key={item}
                   className={tab === item ? "active" : ""}
-                  onClick={() => setTab(item)}
+                  onClick={() => {
+                    setTab(item);
+                    setPage(1);
+                  }}
                 >
                   {item}
                 </button>
@@ -328,7 +339,10 @@ function Routes() {
                 <FiSearch />
                 <input
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setPage(1);
+                  }}
                   placeholder="Search routes, drivers, or vehicles"
                 />
               </label>
@@ -347,7 +361,7 @@ function Routes() {
                 <span>Status</span>
                 <span>Actions</span>
               </div>
-              {filteredRoutes.map((route) => (
+              {visibleRoutes.map((route) => (
                 <button
                   className={`route-card ${selectedRoute?.id === route.id ? "selected" : ""}`}
                   key={route.id}
@@ -389,15 +403,44 @@ function Routes() {
             )}
             <div className="routes-footer">
               <span>
-                Showing {filteredRoutes.length ? 1 : 0} to{" "}
-                {filteredRoutes.length} of {routeData.length} routes
+                Showing{" "}
+                {filteredRoutes.length ? (currentPage - 1) * pageSize + 1 : 0}{" "}
+                to {Math.min(currentPage * pageSize, filteredRoutes.length)} of{" "}
+                {filteredRoutes.length} routes
               </span>
-              <div>
-                <button disabled>‹</button>
-                <button className="current-page">1</button>
-                <button>2</button>
-                <button>3</button>
-                <button>›</button>
+              <div aria-label="Routes pagination">
+                <button
+                  aria-label="Previous page"
+                  disabled={currentPage === 1}
+                  onClick={() => setPage((value) => Math.max(1, value - 1))}
+                >
+                  ‹
+                </button>
+                {Array.from({ length: pageCount }, (_, index) => index + 1).map(
+                  (pageNumber) => (
+                    <button
+                      key={pageNumber}
+                      className={
+                        currentPage === pageNumber ? "current-page" : ""
+                      }
+                      aria-current={
+                        currentPage === pageNumber ? "page" : undefined
+                      }
+                      onClick={() => setPage(pageNumber)}
+                    >
+                      {pageNumber}
+                    </button>
+                  ),
+                )}
+                <button
+                  aria-label="Next page"
+                  disabled={currentPage === pageCount}
+                  onClick={() =>
+                    setPage((value) => Math.min(pageCount, value + 1))
+                  }
+                >
+                  ›
+                </button>
               </div>
             </div>
           </div>

@@ -13,6 +13,7 @@ import {
 import { useSchoolReports } from "../hooks/useSchoolReports";
 import { downloadSchoolReport } from "../utils/schoolReport";
 import "../styles/reports.css";
+import QuarterlyReports from "./QuarterlyReports";
 
 const tabs = [
   "Overview",
@@ -712,6 +713,7 @@ function Reports() {
             </div>
           </aside>
         </section>
+        <QuarterlyReports />
       </div>
     </>
   );

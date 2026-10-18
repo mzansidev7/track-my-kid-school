@@ -217,6 +217,19 @@
   object-fit: cover;
 }
 
+.sidebar-user .sidebar-user-avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: #d3ccf4;
+  color: #25236f;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .sidebar-user strong {
   color: #ffffff;
   font-size: 10px;

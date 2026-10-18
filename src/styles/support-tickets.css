@@ -4,8 +4,6 @@
   --support-line: #e8edf4;
   --support-primary: #245fe8;
   color: var(--support-ink);
-  margin: 0 auto;
-  max-width: 1440px;
   padding: 28px 32px 36px;
 }
 
@@ -35,6 +33,7 @@
   font-size: clamp(26px, 3vw, 34px);
   letter-spacing: -0.035em;
   margin: 0;
+  color: black;
 }
 
 .school-support-header p,
@@ -59,7 +58,9 @@
   justify-content: center;
   min-height: 44px;
   padding: 0 17px;
-  transition: background 0.18s ease, transform 0.18s ease;
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
 }
 
 .school-support-primary:hover:not(:disabled) {

@@ -1,7 +1,7 @@
-import { useLocation } from "react-router-dom";
-// import { FiBell, FiSearch } from "react-icons/fi";
-import { FiLogOut } from "react-icons/fi";
+import { useLocation, useNavigate } from "react-router-dom";
+import { FiLogOut, FiBell } from "react-icons/fi";
 import { useEffect, useRef, useState } from "react";
+import { clearSupabaseSession } from "../supabaseClient";
 
 const pageNames = {
   "/dashboard": "Dashboard",
@@ -17,6 +17,7 @@ const pageNames = {
   "/members": "Staff Members",
   "/announcements": "Announcements",
   "/notifications": "Notifications",
+  "/support": "Support Tickets",
   "/reports": "Reports",
   "/incidents": "Incidents",
   "/settings": "Settings",
@@ -47,13 +48,26 @@ function readCachedAdmin(session) {
 
 export default function PortalHeader() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const pageName = pageNames[pathname] || "Dashboard";
-  // const searchName = pageName.toLowerCase();
   const profileMenuRef = useRef(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const session = readSession();
 
   const [admin, setAdmin] = useState(() => readCachedAdmin(session));
+  const [unreadNotifications, setUnreadNotifications] = useState(() => {
+    try {
+      return (
+        Number(
+          localStorage.getItem(
+            `schoolUnreadNotifications:${session.user?.id || "current"}`,
+          ),
+        ) || 0
+      );
+    } catch {
+      return 0;
+    }
+  });
   const displayName =
     [admin?.first_name, admin?.last_name].filter(Boolean).join(" ") ||
     session.user?.name ||
@@ -91,15 +105,27 @@ export default function PortalHeader() {
       }
     };
     window.addEventListener("school-profile-updated", handleProfileUpdate);
+    const handleUnreadCountUpdate = (event) => {
+      const count = Number(event.detail?.count);
+      if (Number.isFinite(count)) setUnreadNotifications(Math.max(0, count));
+    };
+    window.addEventListener(
+      "school-unread-notifications-updated",
+      handleUnreadCountUpdate,
+    );
 
     return () => {
       document.removeEventListener("mousedown", closeMenu);
       document.removeEventListener("keydown", closeOnEscape);
       window.removeEventListener("school-profile-updated", handleProfileUpdate);
+      window.removeEventListener(
+        "school-unread-notifications-updated",
+        handleUnreadCountUpdate,
+      );
     };
   }, []);
 
-  const logout = () => {
+  const logout = async () => {
     let auth = {};
     try {
       auth = JSON.parse(localStorage.getItem("schoolAuth") || "{}");
@@ -110,6 +136,11 @@ export default function PortalHeader() {
     localStorage.removeItem("schoolAuth");
     localStorage.removeItem(`schoolProfileCache:${auth.user?.id || "current"}`);
     sessionStorage.removeItem("schoolAuth");
+    try {
+      await clearSupabaseSession();
+    } catch (error) {
+      console.error("Could not clear Supabase Auth session:", error);
+    }
     window.location.replace("/login");
   };
 
@@ -121,26 +152,26 @@ export default function PortalHeader() {
         <strong>{pageName}</strong>
       </div>
       <div className="portal-top-actions">
-        {/* <label className="portal-search">
-          <FiSearch />
-          <input placeholder={`Search ${searchName}...`} />
-        </label>
-        <button className="icon-button" aria-label="Notifications">
+        <button
+          className="icon-button notification-count-button"
+          type="button"
+          aria-label={`Notifications${unreadNotifications ? `, ${unreadNotifications} unread` : ""}`}
+          title={`${unreadNotifications} unread notifications`}
+          onClick={() => navigate("/notifications")}
+        >
           <FiBell />
-          <b>5</b>
-        </button> */}
+          {unreadNotifications > 0 && (
+            <b className="notification-count-badge">
+              {unreadNotifications > 99 ? "99+" : unreadNotifications}
+            </b>
+          )}
+        </button>
         <div className="top-profile profile-menu" ref={profileMenuRef}>
-          <div
-            style={{
-              border: "1px solid grey",
-              borderRadius: "50%",
-              padding: "5px",
-            }}
-          >
+          <div className="portal-admin-avatar">
             {admin?.avatar ? (
               <img src={admin.avatar} alt="School admin" />
             ) : (
-              <p>{initials || "SA"}</p>
+              <span aria-label="School admin initials">{initials || "SA"}</span>
             )}
           </div>
           <button

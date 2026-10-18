@@ -1,12 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   FiArrowLeft,
+  FiChevronLeft,
+  FiChevronRight,
+  FiDownload,
+  FiFile,
+  FiHeart,
+  FiMic,
   FiMoreVertical,
   FiPaperclip,
   FiPhone,
   FiSearch,
   FiSend,
+  FiSmile,
+  FiSquare,
   FiVideo,
+  FiX,
 } from "react-icons/fi";
 import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
@@ -23,6 +33,56 @@ const roleByTab = {
   Drivers: "Driver",
   Staff: "Staff",
 };
+const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+const MAX_ATTACHMENTS_PER_MESSAGE = 20;
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "audio/mp4",
+  "audio/m4a",
+  "audio/mpeg",
+  "audio/aac",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/webm",
+  "audio/3gpp",
+]);
+const EMOJI_CATEGORIES = [
+  { name: "Smileys", icon: "😀", emojis: "😀 😃 😄 😁 😆 😅 😂 🤣 🥲 ☺️ 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😋 😛 😜 🤪 🤗 🤔 😎 🥳 😕 🙁 😮 😳 🥺 🥹 😢 😭 😱 😤 😡 🤬 😴 🤒 🤢 🤧 🥶 🥵 🤯 👻 💩".split(" ") },
+  { name: "People", icon: "👋", emojis: "👋 🤚 ✋ 🖐️ 👌 🤌 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 👍 👎 👏 🙌 🫶 🙏 💪 🦾 🦵 👂 👃 👀 👶 🧒 🧑 👨 👩 🧓 🙋 🙆 🙅 🤷 🤦 💃 🕺 🏃 🚶".split(" ") },
+  { name: "Animals", icon: "🐻", emojis: "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🦆 🦉 🦇 🐺 🐴 🦄 🐝 🦋 🐞 🐢 🐍 🦎 🐙 🦑 🦀 🐠 🐟 🐬 🐳 🦈 🐘 🦒 🐕 🐈 🦜 🦢".split(" ") },
+  { name: "Food", icon: "🍕", emojis: "🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍒 🍑 🥭 🍍 🥝 🍅 🥑 🥦 🥕 🌽 🥐 🍞 🧀 🥚 🍳 🥞 🥓 🍔 🍟 🍕 🌮 🌯 🥗 🍝 🍜 🍣 🍱 🍰 🎂 🍪 🍩 🍫 🍿 ☕ 🧃 🥤 🍺 🍷".split(" ") },
+  { name: "Travel", icon: "🚗", emojis: "🚗 🚕 🚙 🚌 🏎️ 🚓 🚑 🚒 🚐 🚚 🚜 🛵 🏍️ 🚲 🛴 🚦 ⚓ ⛵ 🚤 🚢 ✈️ 🛫 🛬 🚁 🚀 🛸 🌍 🗺️ 🧭 🏔️ 🏕️ 🏖️ 🏝️ 🏠 🏢 🏥 🏫 🏰 🗼 🌅 🌆 🌉".split(" ") },
+  { name: "Activities", icon: "⚽", emojis: "⚽ 🏀 🏈 ⚾ 🎾 🏐 🏉 🎱 🏓 🏸 🥊 🥋 🛹 🛼 ⛸️ 🎿 🏂 🏋️ 🤼 🤸 🏇 🧘 🏄 🏊 🏆 🥇 🥈 🥉 🎖️ 🎨 🎬 🎤 🎧 🎹 🥁 🎷 🎸 🎻 🎲 🎯 🎳 🎮 🧩 🎉 🎊".split(" ") },
+  { name: "Objects", icon: "💡", emojis: "💌 💝 💖 💗 💓 💞 💕 💔 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💯 💢 💥 💫 💦 💬 💭 💤 💻 📱 ☎️ 📷 🎥 💡 🔦 📚 📝 📌 ✂️ 🔒 🔑 🔨 🔧 🧰 💉 💊 🛏️ 🚿 🛒 🎁 🏷️".split(" ") },
+  { name: "Symbols", icon: "✅", emojis: "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 ☮️ ✝️ ☪️ 🕉️ ☸️ ✡️ ☯️ ♈ ♉ ♊ ♋ ♌ ♍ ♎ ♏ ♐ ♑ ♒ ♓ ✅ ❎ ❌ ⭕ 🚫 ❗ ❓ ‼️ ⁉️ ⚠️ ➕ ➖ ➗ ✖️ ♾️ ✔️ ☑️ 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪ ⭐ 🌟 ✨ ⚡ 🔥 💧 🌈 ☀️ 🌙".split(" ") },
+  "📦",
+  "🛠️",
+];
+const QUICK_MESSAGE_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
+const RECORDING_MIME_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/3gpp",
+];
+
+function getAttachmentMediaType(mimeType) {
+  const normalized = mimeType.split(";")[0].trim().toLowerCase();
+  if (normalized.startsWith("image/")) return "image";
+  if (normalized === "application/pdf") return "pdf";
+  if (normalized.startsWith("audio/")) return "audio";
+  return null;
+}
+
+function formatRecordingTime(seconds) {
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(
+    seconds % 60,
+  ).padStart(2, "0")}`;
+}
 
 function getAuth() {
   try {
@@ -71,10 +131,72 @@ function isSupportParticipant(person) {
 
 function getRoleLabel(person) {
   if (isSupportParticipant(person)) return "Support team";
+  if (person?.role === "group") return "Group chat";
   if (person?.role === "client") return "Parent";
   if (person?.role === "driver") return "Driver";
   if (person?.role === "owner") return "Fleet owner";
   return "Staff";
+}
+
+function parseMessageAttachment(content) {
+  try {
+    const value = JSON.parse(content);
+    const normalizeAttachment = (item) => {
+      if (!item || typeof item.url !== "string") return null;
+      const url = new URL(item.url);
+      const isRemoteUrl = ["http:", "https:"].includes(url.protocol);
+      const isLocalPreviewUrl =
+        url.protocol === "blob:" && url.origin === window.location.origin;
+      if (!isRemoteUrl && !isLocalPreviewUrl) return null;
+      const mimeType = String(
+        item.mimeType || item.mime_type || "",
+      ).toLowerCase();
+      const mediaType =
+        item.mediaType ||
+        item.media_type ||
+        (mimeType.startsWith("image/")
+          ? "image"
+          : mimeType.startsWith("audio/")
+            ? "audio"
+            : mimeType === "application/pdf"
+              ? "pdf"
+              : "");
+      if (!["image", "audio", "pdf"].includes(mediaType)) return null;
+      return {
+        mediaType,
+        url: url.href,
+        name: typeof item.name === "string" ? item.name : "Attachment",
+      };
+    };
+    const attachments =
+      value?.type === "attachment" && value.url
+        ? [normalizeAttachment(value)].filter(Boolean)
+        : value?.type === "attachment_group" && Array.isArray(value.attachments)
+          ? value.attachments.map(normalizeAttachment).filter(Boolean)
+          : [];
+    if (!attachments.length) return null;
+    return {
+      attachments,
+      caption: typeof value.caption === "string" ? value.caption : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getMessagePreview(content) {
+  if (!content) return "Start a conversation";
+  const attachment = parseMessageAttachment(content);
+  if (!attachment) return content;
+  const label =
+    attachment.attachments.length > 1
+      ? `${attachment.attachments.length} attachments`
+      : attachment.attachments[0].mediaType === "image"
+        ? "Photo"
+        : attachment.attachments[0].mediaType === "audio"
+          ? "Voice message"
+          : "File attachment";
+  return attachment.caption ? `${label}: ${attachment.caption}` : label;
 }
 
 function readCache(key, fallback) {
@@ -154,6 +276,317 @@ function Messages() {
   const [conversationError, setConversationError] = useState("");
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [deletingConversation, setDeletingConversation] = useState(false);
+  const [attachmentPreview, setAttachmentPreview] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewError, setPreviewError] = useState(null);
+  const [downloadingPreview, setDownloadingPreview] = useState(false);
+  const [selectedAttachments, setSelectedAttachments] = useState([]);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [emojiCategory, setEmojiCategory] = useState(0);
+  const [emojiSearch, setEmojiSearch] = useState("");
+  const [reactionPickerMessageId, setReactionPickerMessageId] = useState(null);
+  const [reactionPickerPosition, setReactionPickerPosition] = useState(null);
+  const [emojiPopupPosition, setEmojiPopupPosition] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [composerError, setComposerError] = useState("");
+  const fileInputRef = useRef(null);
+  const draftInputRef = useRef(null);
+  const selectedConversationIdRef = useRef(null);
+  const emojiButtonRef = useRef(null);
+  const recorderRef = useRef(null);
+  const recordingStreamRef = useRef(null);
+  const stagedObjectUrlsRef = useRef([]);
+  const attachmentPreviewUrls = useMemo(
+    () => selectedAttachments.map((entry) => entry.previewUrl),
+    [selectedAttachments],
+  );
+
+  const activePreviewAttachment =
+    attachmentPreview?.items?.[attachmentPreview.index];
+  const activeEmojiCategory = EMOJI_CATEGORIES[emojiCategory];
+  const visibleEmojis = emojiSearch.trim()
+    ? EMOJI_CATEGORIES.flatMap((category) => category.emojis).filter((emoji) =>
+        emoji.includes(emojiSearch.trim()),
+      )
+    : activeEmojiCategory.emojis;
+
+  useEffect(() => {
+    if (!emojiPickerOpen) return undefined;
+    const updatePosition = () => {
+      const button = emojiButtonRef.current;
+      if (!button) return;
+      const rect = button.getBoundingClientRect();
+      const width = Math.min(430, window.innerWidth - 24);
+      setEmojiPopupPosition({
+        left: Math.max(
+          12,
+          Math.min(rect.left, window.innerWidth - width - 12),
+        ),
+        bottom: Math.max(12, window.innerHeight - rect.top + 8),
+        width,
+      });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [emojiPickerOpen]);
+
+  useEffect(
+    () => () => {
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.onstop = null;
+        recorder.onerror = null;
+        recorder.stop();
+      }
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+      stagedObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!recording) return undefined;
+    const timer = window.setInterval(
+      () => setRecordingSeconds((seconds) => seconds + 1),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [recording]);
+
+  const stageAttachments = (files) => {
+    const availableSlots =
+      MAX_ATTACHMENTS_PER_MESSAGE - selectedAttachments.length;
+    if (files.length > availableSlots) {
+      setComposerError(
+        `You can send up to ${MAX_ATTACHMENTS_PER_MESSAGE} attachments in one message.`,
+      );
+      return;
+    }
+    const invalidFile = files.find((file) => {
+      const mimeType = file.type.split(";")[0].trim().toLowerCase();
+      return (
+        !ALLOWED_ATTACHMENT_TYPES.has(mimeType) ||
+        file.size > MAX_ATTACHMENT_SIZE
+      );
+    });
+    if (invalidFile) {
+      setComposerError(
+        invalidFile.size > MAX_ATTACHMENT_SIZE
+          ? `${invalidFile.name} is over the 20 MB attachment limit.`
+          : `${invalidFile.name} is not a supported attachment type.`,
+      );
+      return;
+    }
+    setComposerError("");
+    const stagedFiles = files.map((file) => {
+      const previewUrl = URL.createObjectURL(file);
+      stagedObjectUrlsRef.current.push(previewUrl);
+      return { file, previewUrl };
+    });
+    setSelectedAttachments((current) => [...current, ...stagedFiles]);
+  };
+
+  const removeStagedAttachment = (index) => {
+    const removed = selectedAttachments[index];
+    if (removed?.previewUrl) {
+      URL.revokeObjectURL(removed.previewUrl);
+      stagedObjectUrlsRef.current = stagedObjectUrlsRef.current.filter(
+        (url) => url !== removed.previewUrl,
+      );
+    }
+    setSelectedAttachments((current) =>
+      current.filter((_, itemIndex) => itemIndex !== index),
+    );
+  };
+
+  const toggleVoiceRecording = async () => {
+    if (recording && recorderRef.current) {
+      recorderRef.current.stop();
+      setRecording(false);
+      return;
+    }
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof window.MediaRecorder === "undefined"
+    ) {
+      setComposerError("Voice recording is not supported by this browser.");
+      return;
+    }
+    try {
+      const mimeType = RECORDING_MIME_TYPES.find((type) =>
+        window.MediaRecorder.isTypeSupported(type),
+      );
+      if (!mimeType) {
+        setComposerError("Voice recording is not supported by this browser.");
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      const recorder = new window.MediaRecorder(stream, { mimeType });
+      const chunks = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      recorder.onerror = () => {
+        setComposerError("Voice recording failed. Please try again.");
+        setRecording(false);
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        recorderRef.current = null;
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        recorderRef.current = null;
+        setRecording(false);
+        if (!chunks.length) return;
+        const blob = new Blob(chunks, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        const extension = blob.type.includes("mp4")
+          ? "m4a"
+          : blob.type.includes("3gpp")
+            ? "3gp"
+            : "webm";
+        const file = new File([blob], `voice-note-${Date.now()}.${extension}`, {
+          type: blob.type,
+        });
+        if (file.size > MAX_ATTACHMENT_SIZE) {
+          setComposerError(
+            "This recording is over the 20 MB attachment limit.",
+          );
+          return;
+        }
+        stageAttachments([file]);
+        setRecordingSeconds(0);
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecordingSeconds(0);
+      setComposerError("");
+      setRecording(true);
+    } catch (error) {
+      console.error("Could not start school voice recording:", error);
+      setComposerError(
+        error.name === "NotAllowedError"
+          ? "Microphone access was denied."
+          : "Voice recording could not be started on this device.",
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!activePreviewAttachment) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    let objectUrl = "";
+    fetch(activePreviewAttachment.url, {
+      signal: controller.signal,
+      referrerPolicy: "no-referrer",
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Preview could not be loaded.");
+        return response.blob();
+      })
+      .then((blob) => {
+        const type =
+          activePreviewAttachment.mediaType === "pdf"
+            ? "application/pdf"
+            : blob.type;
+        objectUrl = URL.createObjectURL(new Blob([blob], { type }));
+        setPreviewUrl({
+          sourceUrl: activePreviewAttachment.url,
+          objectUrl,
+        });
+        setPreviewError(null);
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") {
+          console.error("Could not load attachment preview:", error);
+          setPreviewError({
+            sourceUrl: activePreviewAttachment.url,
+            message: "Preview could not be loaded. Try downloading it.",
+          });
+        }
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [activePreviewAttachment]);
+
+  useEffect(() => {
+    if (!attachmentPreview || attachmentPreview.items.length < 2) {
+      return undefined;
+    }
+    const handleKeyDown = (event) => {
+      if (event.key === "ArrowLeft") {
+        setAttachmentPreview((current) => ({
+          ...current,
+          index:
+            (current.index - 1 + current.items.length) % current.items.length,
+        }));
+      } else if (event.key === "ArrowRight") {
+        setAttachmentPreview((current) => ({
+          ...current,
+          index: (current.index + 1) % current.items.length,
+        }));
+      } else if (event.key === "Escape") {
+        setAttachmentPreview(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [attachmentPreview]);
+
+  const downloadPreviewAttachment = async () => {
+    if (!activePreviewAttachment) return;
+    setDownloadingPreview(true);
+    setPreviewError(null);
+    try {
+      const response = await fetch(activePreviewAttachment.url, {
+        referrerPolicy: "no-referrer",
+      });
+      if (!response.ok) throw new Error("Attachment could not be downloaded.");
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = activePreviewAttachment.name || "attachment";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      console.error("Could not download attachment:", error);
+      setPreviewError({
+        sourceUrl: activePreviewAttachment.url,
+        message: "Download failed. Please try again.",
+      });
+    } finally {
+      setDownloadingPreview(false);
+    }
+  };
+
+  const activePreviewUrl =
+    activePreviewAttachment &&
+    previewUrl?.sourceUrl === activePreviewAttachment.url
+      ? previewUrl.objectUrl
+      : "";
+  const activePreviewError =
+    activePreviewAttachment &&
+    previewError?.sourceUrl === activePreviewAttachment.url
+      ? previewError.message
+      : "";
 
   const loadConversations = useCallback(async () => {
     try {
@@ -180,7 +613,12 @@ function Messages() {
       if (!conversationId) return;
       const cacheKey = `${messagesCachePrefix}:${conversationId}`;
       const cachedMessages = readCache(cacheKey, null);
-      if (Array.isArray(cachedMessages)) setMessages(cachedMessages);
+      if (
+        Array.isArray(cachedMessages) &&
+        String(selectedConversationIdRef.current) === String(conversationId)
+      ) {
+        setMessages(cachedMessages);
+      }
       const data = await apiRequest(
         `/school/conversations/${conversationId}/messages`,
         { headers: { Authorization: `Bearer ${auth.token || ""}` } },
@@ -190,6 +628,11 @@ function Messages() {
         cacheKey,
         JSON.stringify({ data: next, timestamp: Date.now() }),
       );
+      if (
+        String(selectedConversationIdRef.current) !== String(conversationId)
+      ) {
+        return;
+      }
       setMessages(next);
     },
     [auth.token, messagesCachePrefix],
@@ -197,6 +640,7 @@ function Messages() {
 
   const openConversation = useCallback(
     async (conversation) => {
+      selectedConversationIdRef.current = conversation.id;
       setSelectedConversation(conversation);
       const cacheKey = `${messagesCachePrefix}:${conversation.id}`;
       const cachedMessages = readCache(cacheKey, null);
@@ -255,6 +699,7 @@ function Messages() {
         JSON.stringify({ data: next, timestamp: Date.now() }),
       );
       localStorage.removeItem(`${messagesCachePrefix}:${conversation.id}`);
+      selectedConversationIdRef.current = null;
       setSelectedConversation(null);
       setMessages([]);
       setConversationMenuOpen(false);
@@ -287,6 +732,11 @@ function Messages() {
         payload?.new?.conversation_id || payload?.old?.conversation_id;
       if (conversationId && conversationId === selectedConversation?.id) {
         void loadMessages(conversationId);
+      } else if (
+        payload?.table === "message_reactions" &&
+        selectedConversation?.id
+      ) {
+        void loadMessages(selectedConversation.id);
       }
     };
 
@@ -302,6 +752,11 @@ function Messages() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "messages" },
+        refreshMessages,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "message_reactions" },
         refreshMessages,
       );
 
@@ -341,12 +796,191 @@ function Messages() {
     });
   }, [activeTab, auth.user?.id, conversations, search]);
 
+  const toggleMessageReaction = async (message, emoji) => {
+    if (!selectedConversation || String(message.id).startsWith("optimistic-")) return;
+    const previousReactions = message.reactions || [];
+    const selected = previousReactions.find((reaction) => reaction.emoji === emoji);
+    const userAlreadyReacted =
+      selected?.userIds?.includes(auth.user?.id) || selected?.reactedByMe;
+    const optimisticReactions = userAlreadyReacted
+      ? previousReactions
+          .map((reaction) =>
+            reaction.emoji === emoji
+              ? {
+                  ...reaction,
+                  count: reaction.count - 1,
+                  userIds: reaction.userIds?.filter(
+                    (id) => id !== auth.user?.id,
+                  ),
+                  reactedByMe: false,
+                }
+              : reaction,
+          )
+          .filter((reaction) => reaction.count > 0)
+      : selected
+        ? previousReactions.map((reaction) =>
+            reaction.emoji === emoji
+              ? {
+                  ...reaction,
+                  count: reaction.count + 1,
+                  userIds: [...(reaction.userIds || []), auth.user?.id],
+                  reactedByMe: true,
+                }
+              : reaction,
+          )
+        : [
+            ...previousReactions,
+            {
+              emoji,
+              count: 1,
+              userIds: [auth.user?.id],
+              reactedByMe: true,
+            },
+          ];
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === message.id
+          ? { ...item, reactions: optimisticReactions }
+          : item,
+      ),
+    );
+    setReactionPickerMessageId(null);
+    setReactionPickerPosition(null);
+    try {
+      const result = await apiRequest(
+        `/school/conversations/${selectedConversation.id}/messages/${message.id}/reactions`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${auth.token || ""}` },
+          body: JSON.stringify({ emoji }),
+        },
+      );
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === message.id
+            ? { ...item, reactions: result.reactions || [] }
+            : item,
+        ),
+      );
+    } catch (error) {
+      console.error("Could not update school message reaction:", error);
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === message.id
+            ? { ...item, reactions: previousReactions }
+            : item,
+        ),
+      );
+      setComposerError(error.message || "Reaction could not be saved.");
+    }
+  };
+
+  const toggleReactionPicker = (messageId, event) => {
+    if (reactionPickerMessageId === messageId) {
+      setReactionPickerMessageId(null);
+      setReactionPickerPosition(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const popupWidth = 212;
+    const popupHeight = 44;
+    setReactionPickerPosition({
+      left: Math.max(8, Math.min(rect.right - popupWidth, window.innerWidth - popupWidth - 8)),
+      top:
+        rect.top >= popupHeight + 8
+          ? rect.top - popupHeight - 8
+          : Math.min(rect.bottom + 8, window.innerHeight - popupHeight - 8),
+    });
+    setReactionPickerMessageId(messageId);
+  };
+
   const sendMessage = async (event) => {
     event.preventDefault();
-    if (!draft.trim() || !selectedConversation || sending) return;
+    const content = draft.trim();
+    if (
+      (!content && selectedAttachments.length === 0) ||
+      !selectedConversation ||
+      sending ||
+      recording
+    ) {
+      return;
+    }
+
+    const optimisticId = `optimistic-${Date.now()}`;
+    const localAttachments = selectedAttachments.map(
+      ({ file, previewUrl }) => ({
+        url: previewUrl,
+        name: file.name,
+        mimeType: file.type,
+        mediaType: getAttachmentMediaType(file.type),
+      }),
+    );
+    const optimisticContent = localAttachments.length
+      ? JSON.stringify(
+          localAttachments.length === 1
+            ? {
+                type: "attachment",
+                ...localAttachments[0],
+                caption: content,
+              }
+            : {
+                type: "attachment_group",
+                attachments: localAttachments,
+                caption: content,
+              },
+        )
+      : content;
+    setMessages((current) => [
+      ...current,
+      {
+        id: optimisticId,
+        content: optimisticContent,
+        sender_id: auth.user?.id,
+        sent_at: new Date().toISOString(),
+        is_read: false,
+      },
+    ]);
+    setDraft("");
     setSending(true);
+    setComposerError("");
+
     try {
-      await apiRequest("/school/messages", {
+      const uploadedAttachments = [];
+      for (const { file } of selectedAttachments) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const uploaded = await apiRequest(
+          `/school/conversations/${selectedConversation.id}/attachments`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${auth.token || ""}` },
+            body: formData,
+          },
+        );
+        uploadedAttachments.push({
+          url: uploaded.url,
+          name: uploaded.name,
+          mimeType: uploaded.mimeType,
+          mediaType: uploaded.mediaType,
+        });
+      }
+
+      const messageContent = uploadedAttachments.length
+        ? JSON.stringify(
+            uploadedAttachments.length === 1
+              ? {
+                  type: "attachment",
+                  ...uploadedAttachments[0],
+                  caption: content,
+                }
+              : {
+                  type: "attachment_group",
+                  attachments: uploadedAttachments,
+                  caption: content,
+                },
+          )
+        : content;
+      const sentMessage = await apiRequest("/school/messages", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${auth.token || ""}`,
@@ -354,11 +988,30 @@ function Messages() {
         },
         body: JSON.stringify({
           conversationId: selectedConversation.id,
-          content: draft.trim(),
+          content: messageContent,
         }),
       });
-      setDraft("");
-      await openConversation(selectedConversation);
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === optimisticId ? sentMessage : message,
+        ),
+      );
+      setSelectedAttachments([]);
+      stagedObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      stagedObjectUrlsRef.current = [];
+      setEmojiPickerOpen(false);
+      void loadConversations();
+    } catch (error) {
+      console.error("Could not send school message:", error);
+      setComposerError(error.message || "Message could not be sent.");
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === optimisticId
+            ? { ...message, deliveryError: true }
+            : message,
+        ),
+      );
     } finally {
       setSending(false);
     }
@@ -456,6 +1109,7 @@ function Messages() {
           className="messages-new-button"
           type="button"
           onClick={() => {
+            selectedConversationIdRef.current = null;
             setSelectedConversation(null);
             setActiveTab("Staff");
             void loadStaff();
@@ -526,7 +1180,7 @@ function Messages() {
                           </time>
                         </span>
                         <span className="conversation-preview">
-                          {lastMessage.content || "Start a conversation"}
+                          {getMessagePreview(lastMessage.content)}
                         </span>
                         <span className="conversation-role">
                           {getRoleLabel(participant)}
@@ -579,7 +1233,10 @@ function Messages() {
               <header className="chat-panel-header">
                 <button
                   className="mobile-chat-back"
-                  onClick={() => setSelectedConversation(null)}
+                  onClick={() => {
+                    selectedConversationIdRef.current = null;
+                    setSelectedConversation(null);
+                  }}
                 >
                   <FiArrowLeft />
                 </button>
@@ -592,9 +1249,7 @@ function Messages() {
                   <h2>
                     {getPersonName(selectedConversation.other_participant)}
                   </h2>
-                  <p>
-                    {getRoleLabel(selectedConversation.other_participant)}
-                  </p>
+                  <p>{getRoleLabel(selectedConversation.other_participant)}</p>
                 </div>
                 <div className="chat-actions">
                   <button aria-label="Call">
@@ -644,15 +1299,193 @@ function Messages() {
                         key={message.id}
                       >
                         <div className={`message-bubble ${own ? "own" : ""}`}>
-                          <p>{message.content}</p>
-                          <time>
-                            {formatTime(message.sent_at)}
-                            {message.sender_id === auth.user?.id
-                              ? message.is_read
-                                ? "  ✓✓"
-                                : "  ✓"
-                              : ""}
-                          </time>
+                          {(() => {
+                            const attachment = parseMessageAttachment(
+                              message.content,
+                            );
+                            if (!attachment) {
+                              return <p>{message.content}</p>;
+                            }
+                            return (
+                              <div className="message-attachment">
+                                <div className="message-attachment-group">
+                                  {attachment.attachments.map((item, index) => {
+                                    if (item.mediaType === "image") {
+                                      const imageItems =
+                                        attachment.attachments.filter(
+                                          (entry) =>
+                                            entry.mediaType === "image",
+                                        );
+                                      const imageIndex =
+                                        imageItems.indexOf(item);
+                                      return (
+                                        <button
+                                          type="button"
+                                          className="message-attachment-preview-trigger"
+                                          aria-label={`Preview image ${item.name}`}
+                                          onClick={() =>
+                                            setAttachmentPreview({
+                                              items: imageItems,
+                                              index: imageIndex,
+                                            })
+                                          }
+                                          key={`${item.url}-${index}`}
+                                        >
+                                          <img
+                                            className="message-attachment-image"
+                                            src={item.url}
+                                            alt={item.name}
+                                            loading="lazy"
+                                            referrerPolicy="no-referrer"
+                                          />
+                                        </button>
+                                      );
+                                    }
+                                    if (item.mediaType === "audio") {
+                                      return (
+                                        <audio
+                                          className="message-attachment-audio"
+                                          controls
+                                          preload="metadata"
+                                          src={item.url}
+                                          aria-label={item.name}
+                                          key={`${item.url}-${index}`}
+                                        />
+                                      );
+                                    }
+                                    return (
+                                      <button
+                                        type="button"
+                                        className="message-attachment-file"
+                                        onClick={() =>
+                                          setAttachmentPreview({
+                                            items: [item],
+                                            index: 0,
+                                          })
+                                        }
+                                        key={`${item.url}-${index}`}
+                                      >
+                                        <FiPaperclip />
+                                        <span>{item.name}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                {attachment.caption && (
+                                  <p className="message-attachment-caption">
+                                    {attachment.caption}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })()}
+                          <div className={`message-footer${own ? " own" : ""}`}>
+                            {/* Show reaction badges for both own and other messages next to the timestamp */}
+                            {message.reactions?.length > 0 && (
+                              <span
+                                className="message-reaction-badges"
+                                aria-label={own ? "Reactions to your message" : "Reactions to message"}
+                              >
+                                {message.reactions.map((reaction) => (
+                                  <span key={reaction.emoji}>
+                                    {reaction.emoji}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
+                            <time>
+                              {formatTime(message.sent_at)}
+                              {own && !message.deliveryError && (
+                                <span
+                                  className={`message-read-tick${message.is_read ? " is-read" : ""}`}
+                                  aria-label={message.is_read ? "Read" : "Sent"}
+                                  title={message.is_read ? "Read" : "Sent"}
+                                >
+                                  {message.is_read ? "✓✓" : "✓"}
+                                </span>
+                              )}
+                            </time>
+                            {!own && (
+                              <div className="message-reactions">
+                                {message.reactions?.map((reaction) => {
+                                  const selected =
+                                    reaction.userIds?.includes(auth.user?.id) ||
+                                    reaction.reactedByMe;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={reaction.emoji}
+                                      className={`message-reaction-chip${selected ? " selected" : ""}`}
+                                      onClick={() =>
+                                        void toggleMessageReaction(
+                                          message,
+                                          reaction.emoji,
+                                        )
+                                      }
+                                      aria-label={`${reaction.emoji} reaction`}
+                                      aria-pressed={Boolean(selected)}
+                                    >
+                                      <span>{reaction.emoji}</span>
+                                    </button>
+                                  );
+                                })}
+                                {reactionPickerMessageId === message.id && (
+                                  createPortal(
+                                    <div
+                                      className="message-reaction-picker"
+                                      style={reactionPickerPosition}
+                                    >
+                                      {QUICK_MESSAGE_REACTIONS.map((emoji) => (
+                                        <button
+                                          type="button"
+                                          key={emoji}
+                                          onClick={() =>
+                                            void toggleMessageReaction(message, emoji)
+                                          }
+                                          aria-label={`React with ${emoji}`}
+                                        >
+                                          {emoji}
+                                        </button>
+                                      ))}
+                                    </div>,
+                                    document.body,
+                                  )
+                                )}
+                                {!String(message.id).startsWith("optimistic-") && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className={`message-reaction-like${message.reactions?.some((reaction) => reaction.emoji === "❤️" && (reaction.userIds?.includes(auth.user?.id) || reaction.reactedByMe)) ? " selected" : ""}`}
+                                      onClick={() =>
+                                        void toggleMessageReaction(message, "❤️")
+                                      }
+                                      aria-label="Like message"
+                                    >
+                                      <FiHeart />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="message-reaction-add"
+                                      onClick={(event) =>
+                                        toggleReactionPicker(message.id, event)
+                                      }
+                                      aria-label="Add reaction"
+                                      aria-expanded={
+                                        reactionPickerMessageId === message.id
+                                      }
+                                    >
+                                      <FiSmile />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {message.deliveryError && (
+                            <span className="message-delivery-error">
+                              Message not sent
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -664,22 +1497,218 @@ function Messages() {
                 )}
               </div>
               <form className="message-composer" onSubmit={sendMessage}>
-                <button type="button" aria-label="Attach file">
-                  <FiPaperclip />
-                </button>
                 <input
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder="Type your message..."
+                  ref={fileInputRef}
+                  className="message-file-input"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,audio/mp4,audio/m4a,audio/mpeg,audio/aac,audio/wav,audio/x-wav,audio/webm,audio/3gpp"
+                  multiple
+                  onChange={(event) => {
+                    stageAttachments(Array.from(event.target.files || []));
+                    event.target.value = "";
+                  }}
+                  aria-label="Choose message attachments"
                 />
-                <button
-                  className="send-message"
-                  type="submit"
-                  disabled={!draft.trim() || sending}
-                  aria-label="Send message"
-                >
-                  <FiSend />
-                </button>
+                {selectedAttachments.length > 0 && (
+                  <div className="message-composer-attachments">
+                    {selectedAttachments.map(({ file }, index) => {
+                      const mediaType = getAttachmentMediaType(file.type);
+                      return (
+                        <div
+                          className="message-composer-attachment"
+                          key={`${file.name}-${file.lastModified}-${index}`}
+                        >
+                          {mediaType === "image" ? (
+                            <img
+                              src={attachmentPreviewUrls[index]}
+                              alt=""
+                              className="message-composer-attachment-image"
+                            />
+                          ) : (
+                            <span className="message-composer-attachment-icon">
+                              {mediaType === "audio" ? <FiMic /> : <FiFile />}
+                            </span>
+                          )}
+                          <span className="message-composer-attachment-name">
+                            {file.name}
+                          </span>
+                          <button
+                            type="button"
+                            className="message-composer-attachment-remove"
+                            onClick={() => removeStagedAttachment(index)}
+                            aria-label={`Remove ${file.name}`}
+                            disabled={sending}
+                          >
+                            <FiX />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {emojiPickerOpen &&
+                  !recording &&
+                  emojiPopupPosition &&
+                  createPortal(
+                    <div
+                      className="message-emoji-overlay"
+                      onClick={() => setEmojiPickerOpen(false)}
+                    >
+                      <div
+                        className="message-emoji-picker"
+                        style={{
+                          position: "fixed",
+                          left: emojiPopupPosition.left,
+                          bottom: emojiPopupPosition.bottom,
+                          width: emojiPopupPosition.width,
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        aria-label="Choose emoji"
+                      >
+                        <div className="message-emoji-header">
+                          <strong>Choose an emoji</strong>
+                          <button
+                            type="button"
+                            onClick={() => setEmojiPickerOpen(false)}
+                            aria-label="Close emoji picker"
+                          >
+                            <FiX />
+                          </button>
+                        </div>
+                        <input
+                          className="message-emoji-search"
+                          value={emojiSearch}
+                          onChange={(event) =>
+                            setEmojiSearch(event.target.value)
+                          }
+                          placeholder="Search emojis"
+                          aria-label="Search emojis"
+                        />
+                        {!emojiSearch.trim() && (
+                          <div className="message-emoji-categories">
+                            {EMOJI_CATEGORIES.map((category, index) => (
+                              <button
+                                type="button"
+                                key={category.name}
+                                className={
+                                  emojiCategory === index ? "active" : undefined
+                                }
+                                onClick={() => setEmojiCategory(index)}
+                                aria-label={`${category.name} emoji`}
+                                aria-pressed={emojiCategory === index}
+                              >
+                                <span>{category.icon}</span>
+                                <small>{category.name}</small>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <strong className="message-emoji-category-title">
+                          {emojiSearch.trim()
+                            ? "Search results"
+                            : activeEmojiCategory.name}
+                        </strong>
+                        <div className="message-emoji-grid">
+                          {visibleEmojis.length ? (
+                            visibleEmojis.map((emoji, index) => (
+                              <button
+                                type="button"
+                                key={`${emoji}-${index}`}
+                                onClick={() => {
+                                  const input = draftInputRef.current;
+                                  const cursor =
+                                    input?.selectionStart ?? draft.length;
+                                  const nextDraft = `${draft.slice(0, cursor)}${emoji}${draft.slice(cursor)}`;
+                                  setDraft(nextDraft);
+                                  requestAnimationFrame(() => {
+                                    input?.focus();
+                                    input?.setSelectionRange(
+                                      cursor + emoji.length,
+                                      cursor + emoji.length,
+                                    );
+                                  });
+                                }}
+                                aria-label={`Insert ${emoji}`}
+                              >
+                                {emoji}
+                              </button>
+                            ))
+                          ) : (
+                            <span className="message-emoji-no-results">
+                              No matching emojis
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>,
+                    document.body,
+                  )}
+                <div className="message-composer-row">
+                  <button
+                    type="button"
+                    aria-label="Attach files"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={sending || recording}
+                  >
+                    <FiPaperclip />
+                  </button>
+                  <button
+                    ref={emojiButtonRef}
+                    type="button"
+                    aria-label="Choose emoji"
+                    aria-expanded={emojiPickerOpen}
+                    onClick={() => setEmojiPickerOpen((open) => !open)}
+                    disabled={sending || recording}
+                  >
+                    <FiSmile />
+                  </button>
+                  {recording ? (
+                    <div className="message-recording-status" role="status">
+                      <span className="message-recording-dot" />
+                      <span>Recording voice message</span>
+                      <span className="message-recording-time">
+                        {formatRecordingTime(recordingSeconds)}
+                      </span>
+                      <span className="message-recording-progress" />
+                    </div>
+                  ) : (
+                    <input
+                      ref={draftInputRef}
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      placeholder="Type your message..."
+                      aria-label="Type your message"
+                      disabled={sending}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    aria-label={
+                      recording ? "Stop recording" : "Record voice message"
+                    }
+                    onClick={toggleVoiceRecording}
+                    disabled={sending}
+                  >
+                    {recording ? <FiSquare /> : <FiMic />}
+                  </button>
+                  <button
+                    className="send-message"
+                    type="submit"
+                    disabled={
+                      (!draft.trim() && selectedAttachments.length === 0) ||
+                      sending ||
+                      recording
+                    }
+                    aria-label="Send message"
+                  >
+                    <FiSend />
+                  </button>
+                </div>
+                {composerError && (
+                  <p className="message-composer-error" role="alert">
+                    {composerError}
+                  </p>
+                )}
               </form>
             </>
           ) : (
@@ -691,6 +1720,100 @@ function Messages() {
           )}
         </section>
       </div>
+      {attachmentPreview && activePreviewAttachment && (
+        <div
+          className="school-attachment-modal-backdrop"
+          role="presentation"
+          onClick={() => setAttachmentPreview(null)}
+        >
+          <section
+            className="school-attachment-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${activePreviewAttachment.mediaType === "pdf" ? "PDF" : "Image"} preview`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="school-attachment-modal-download"
+              type="button"
+              onClick={() => void downloadPreviewAttachment()}
+              disabled={downloadingPreview}
+              aria-label="Download attachment"
+              title="Download attachment"
+            >
+              <FiDownload />
+            </button>
+            <button
+              className="school-attachment-modal-close"
+              type="button"
+              onClick={() => setAttachmentPreview(null)}
+              aria-label="Close preview"
+            >
+              <FiX />
+            </button>
+            {activePreviewUrl ? (
+              activePreviewAttachment.mediaType === "pdf" ? (
+                <iframe
+                  className="school-attachment-modal-pdf"
+                  src={activePreviewUrl}
+                  title={activePreviewAttachment.name}
+                />
+              ) : (
+                <img
+                  className="school-attachment-modal-image"
+                  src={activePreviewUrl}
+                  alt={activePreviewAttachment.name}
+                />
+              )
+            ) : (
+              <p className="school-attachment-modal-status">
+                {activePreviewError || "Loading preview..."}
+              </p>
+            )}
+            {activePreviewError && activePreviewUrl ? (
+              <p className="school-attachment-modal-error">
+                {activePreviewError}
+              </p>
+            ) : null}
+            {attachmentPreview.items.length > 1 && (
+              <>
+                <button
+                  className="school-attachment-modal-nav previous"
+                  type="button"
+                  aria-label="Previous attachment"
+                  onClick={() =>
+                    setAttachmentPreview((current) => ({
+                      ...current,
+                      index:
+                        (current.index - 1 + current.items.length) %
+                        current.items.length,
+                    }))
+                  }
+                >
+                  <FiChevronLeft />
+                </button>
+                <button
+                  className="school-attachment-modal-nav next"
+                  type="button"
+                  aria-label="Next attachment"
+                  onClick={() =>
+                    setAttachmentPreview((current) => ({
+                      ...current,
+                      index: (current.index + 1) % current.items.length,
+                    }))
+                  }
+                >
+                  <FiChevronRight />
+                </button>
+                <span className="school-attachment-modal-counter">
+                  {attachmentPreview.index + 1} /{" "}
+                  {attachmentPreview.items.length}
+                </span>
+              </>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }

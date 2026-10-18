@@ -2,7 +2,6 @@ import {
   FiActivity,
   FiAlertTriangle,
   FiBell,
-  FiCreditCard,
   FiFileText,
   FiHome,
   FiLifeBuoy,
@@ -19,6 +18,7 @@ import {
 import { FaBus } from "react-icons/fa";
 import { NavLink } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
+import DocsButton from "../DocsButton";
 import { apiRequest } from "../../api";
 import { supabaseClient } from "../../supabaseClient";
 import {
@@ -63,7 +63,6 @@ const menuItems = [
   { title: "Reports ✓", icon: <FiFileText />, path: "/reports" },
   { title: "Incidents ✓", icon: <FiAlertTriangle />, path: "/incidents" },
   { title: "Settings ✓", icon: <FiSettings />, path: "/settings" },
-  { title: "Subscription & Billing", icon: <FiCreditCard />, path: "/billing" },
 ];
 
 function readSession() {
@@ -199,6 +198,11 @@ export default function Sidebar() {
       ).length;
       setUnreadNotifications(count);
       localStorage.setItem(notificationCacheKey, String(count));
+      window.dispatchEvent(
+        new CustomEvent("school-unread-notifications-updated", {
+          detail: { count },
+        }),
+      );
     }
 
     if (conversationsResult.status === "fulfilled") {
@@ -441,8 +445,20 @@ export default function Sidebar() {
             </NavLink>
           </>
         )}
+      <div className="sidebar-docs">
+        <DocsButton className="sidebar-docs-button" />
+      </div>
       <div className="sidebar-user">
-        <img src="https://i.pravatar.cc/100?img=5" alt="Admin profile" />
+        {admin?.avatar ? (
+          <img src={admin.avatar} alt="Admin profile" />
+        ) : (
+          <span className="sidebar-user-avatar" aria-hidden="true">
+            {[admin?.first_name, admin?.last_name]
+              .filter(Boolean)
+              .map((part) => part.charAt(0).toUpperCase())
+              .join("") || "SA"}
+          </span>
+        )}
         <div>
           <strong>{adminName}</strong>
           <span>{admin?.job_title || admin?.role || "School Admin"}</span>

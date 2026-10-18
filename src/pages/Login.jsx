@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FiArrowRight, FiLock, FiMail } from "react-icons/fi";
-import { apiRequest } from "../api";
+import { apiRequest, isJwt } from "../api";
+import { setSupabaseSession } from "../supabaseClient";
 import logo from "../assets/images/logo.png";
 
 export default function Login() {
@@ -28,10 +29,16 @@ export default function Login() {
       if (result.user?.role !== "school") {
         throw new Error("This portal is for school accounts only.");
       }
+      if (!isJwt(result.token)) {
+        throw new Error(
+          "The server returned an invalid login session. Please contact support.",
+        );
+      }
       if (result.user?.is_verified === false) {
         setPendingAuth(result);
         return;
       }
+      await setSupabaseSession(result.supabaseSession);
       localStorage.setItem("schoolAuth", JSON.stringify(result));
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
@@ -58,10 +65,16 @@ export default function Login() {
       if (result.message !== "OTP_VERIFIED") {
         throw new Error(result.message || "Unable to verify OTP.");
       }
+      if (!isJwt(pendingAuth.token)) {
+        throw new Error(
+          "The server returned an invalid login session. Please contact support.",
+        );
+      }
       const authenticated = {
         ...pendingAuth,
         user: { ...pendingAuth.user, is_verified: true },
       };
+      await setSupabaseSession(authenticated.supabaseSession);
       localStorage.setItem("schoolAuth", JSON.stringify(authenticated));
       navigate("/dashboard", { replace: true });
     } catch (requestError) {

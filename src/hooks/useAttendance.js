@@ -126,6 +126,13 @@ export function useAttendance(date = today()) {
           void reloadOverview();
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "absence_reports" },
+        () => {
+          void reload();
+        },
+      )
       .subscribe();
     return () => supabaseClient.removeChannel(channel);
   }, [auth.user?.id, date, reload, reloadOverview]);
@@ -134,8 +141,15 @@ export function useAttendance(date = today()) {
     const records = new Map(
       (data?.records || []).map((record) => [record.child_id, record]),
     );
+    const reportedAbsences = new Map();
+    (data?.absenceReports || []).forEach((report) => {
+      if (!reportedAbsences.has(report.child_id)) {
+        reportedAbsences.set(report.child_id, report);
+      }
+    });
     return (data?.students || []).map((student) => {
       const record = records.get(student.id);
+      const absenceReport = reportedAbsences.get(student.id);
       const guardian = student.clients;
       return {
         ...student,
@@ -149,7 +163,11 @@ export function useAttendance(date = today()) {
             .join(" ") ||
           guardian?.users?.name ||
           "No guardian linked",
-        status: record?.status || "not_recorded",
+        status: absenceReport
+          ? "absent"
+          : record?.status || "not_recorded",
+        parentReportedAbsence: Boolean(absenceReport),
+        absenceReason: absenceReport?.reason || "",
         arrivalTime: record?.arrival_time || null,
         attendanceRecord: record || null,
       };

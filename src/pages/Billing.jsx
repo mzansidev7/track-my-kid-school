@@ -95,7 +95,8 @@ export default function Billing() {
 
   const current = billing?.subscription;
   const canResumeCheckout =
-    current?.billing_status === "pending" && current.billing_provider === "stripe";
+    current?.billing_status === "pending" &&
+    ["stripe", "paystack"].includes(current.billing_provider);
   const isSelectedCheckout =
     canResumeCheckout &&
     current?.plan_slug === selectedPlan &&
@@ -185,6 +186,8 @@ export default function Billing() {
   const learnerCount = billing?.learner_count || 0;
   const selected = billing?.plans?.find((plan) => plan.slug === selectedPlan);
   const pendingInvoice = billing?.invoices?.find((invoice) => invoice.status === "awaiting_payment");
+  const paymentPending =
+    current?.billing_status === "pending" || Boolean(pendingInvoice);
   const bank = billing?.bank_details || {};
   const trial = billing?.trial;
   const trialDurationRemaining = trial?.ends_at
@@ -203,6 +206,7 @@ export default function Billing() {
     .join(" and ");
   const schoolName = billing?.school?.name || "Your school";
   const hasPaidSubscription = current?.billing_status === "active";
+  const approvalPending = trial?.status === "pending_approval";
   const trialPlan = billing?.plans?.find(
     (plan) => plan.slug === trial?.recommended_plan_slug,
   );
@@ -219,6 +223,49 @@ export default function Billing() {
           <FiRefreshCw /> Refresh
         </button>
       </header>
+
+      {approvalPending && !hasPaidSubscription && (
+        <div className="billing-alert warning" role="status">
+          <strong>Awaiting admin approval</strong>{" "}
+          Your school registration is awaiting approval from Track My Kid support. Your 3-month free trial starts on the approval date.
+        </div>
+      )}
+      {trial?.status === "rejected" && !hasPaidSubscription && (
+        <div className="billing-alert warning" role="status">
+          <strong>Registration not approved</strong>{" "}
+          Please contact Track My Kid support for information about your school registration.
+        </div>
+      )}
+      {!hasPaidSubscription && !approvalPending && trial?.status !== "rejected" && paymentPending && (
+        <div className="billing-alert warning" role="status">
+          <strong>Pending payment</strong>{" "}
+          {pendingInvoice
+            ? pendingInvoice.payment_reported_at
+              ? `EFT payment for invoice ${pendingInvoice.invoice_number} has been reported and is waiting for support confirmation.`
+              : `Invoice ${pendingInvoice.invoice_number} is awaiting payment.`
+            : "Your card checkout is not complete; payment has not been confirmed."}
+          {trial?.status === "active" &&
+            ` Your free trial has ${trialDurationLabel} remaining (${trialDaysRemaining} day${trialDaysRemaining === 1 ? "" : "s"} total), ending ${date(trial.ends_at)}.`}
+          {trial?.status === "expired" &&
+            ` Your free trial ended ${date(trial.ends_at)}. School access is limited to billing until payment is confirmed.`}
+        </div>
+      )}
+      {!hasPaidSubscription && !approvalPending && !paymentPending && trial?.status === "active" && (
+        <div className="billing-alert" role="status">
+          <strong>Free trial</strong>{" "}
+          {schoolName} has {trialDurationLabel} remaining ({trialDaysRemaining} day{trialDaysRemaining === 1 ? "" : "s"} total) in its 3-month free trial, ending {date(trial.ends_at)}. Starter includes up to {trial.starter_learner_limit} learners. No payment is taken automatically when the trial ends.
+        </div>
+      )}
+      {!hasPaidSubscription &&
+      !approvalPending &&
+      trial?.status !== "rejected" &&
+      !paymentPending &&
+      trial?.status === "expired" && (
+          <div className="billing-alert warning" role="status">
+            <strong>Trial ended</strong>{" "}
+            Your free trial ended {date(trial.ends_at)}. No payment was taken automatically. Choose a plan to restore full school access.
+          </div>
+        )}
 
       {error && <div className="billing-alert error" role="alert">{error}</div>}
       {notice && <div className="billing-alert success" role="status">{notice}</div>}
@@ -253,15 +300,27 @@ export default function Billing() {
                 </button>
               )}
             </>
+          ) : trial?.status === "rejected" ? (
+            <p>Your school registration was not approved. Please contact Track My Kid support for more information.</p>
           ) : (
             <>
-              <h2>{trial?.status === "active" ? "3-month free trial" : "No paid plan yet"}</h2>
+              <h2>
+                {trial?.status === "active"
+                  ? "3-month free trial"
+                  : approvalPending
+                    ? "Awaiting admin approval"
+                    : trial?.status === "rejected"
+                      ? "Registration not approved"
+                      : "No paid plan yet"}
+              </h2>
               {trial?.status === "active" ? (
                 <p>
                   {schoolName} is in its 3-month free trial, with {trialDurationLabel} remaining ({trialDaysRemaining} day{trialDaysRemaining === 1 ? "" : "s"} total) · ends {date(trial.ends_at)} · {learnerCount} learners
                 </p>
               ) : trial?.status === "expired" ? (
-                <p>Your 3-month trial ended {date(trial.ends_at)}. Choose a plan to subscribe. School features remain available.</p>
+                <p>Your 3-month trial ended {date(trial.ends_at)}. Choose a plan to subscribe. No payment is taken automatically, and school access is limited to billing until a paid subscription is confirmed.</p>
+              ) : approvalPending ? (
+                <p>Your school must be approved by Track My Kid support before its free trial starts. No subscription payment is due while approval is pending.</p>
               ) : (
                 <p>Choose a plan below to get started. School features remain available while billing is arranged.</p>
               )}
@@ -277,11 +336,6 @@ export default function Billing() {
         </div>
       )}
 
-      {!hasPaidSubscription && trial?.status === "active" && (
-        <div className="billing-alert">
-        {schoolName} is in its 3-month free trial, with {trialDurationLabel} remaining ({trialDaysRemaining} day{trialDaysRemaining === 1 ? "" : "s"} total). Starter includes up to {trial.starter_learner_limit} learners. No payment is taken automatically when the trial ends.
-        </div>
-      )}
       {!hasPaidSubscription && trial?.is_over_starter_limit && trialPlan && (
         <div className="billing-alert warning">
           Your school has {learnerCount} learners, above Starter's {trial.starter_learner_limit}-learner limit. We recommend the {trialPlan.name} plan
@@ -362,10 +416,17 @@ export default function Billing() {
 
       <section className="billing-payment-card">
         <div className="billing-section-heading">
-          <div><h2>Payment method</h2><p>Card payments renew automatically. EFT is confirmed by our team.</p></div>
+          <div>
+            <h2>Payment method</h2>
+            <p>
+              {billing?.payment_provider === "paystack"
+                ? "Paystack card payments are one-time. Renew manually before the paid period ends."
+                : "Card payments renew automatically. EFT is confirmed by our team."}
+            </p>
+          </div>
         </div>
         <div className="billing-methods">
-          <label><input type="radio" name="payment-method" value="card" checked={method === "card"} onChange={() => setMethod("card")} /><FiCreditCard /> Card · Stripe</label>
+          <label><input type="radio" name="payment-method" value="card" checked={method === "card"} onChange={() => setMethod("card")} /><FiCreditCard /> Card · {billing?.payment_provider === "paystack" ? "Paystack" : "Stripe"}</label>
           <label><input type="radio" name="payment-method" value="bank_transfer" checked={method === "bank_transfer"} onChange={() => setMethod("bank_transfer")} /><FiFileText /> Invoice · EFT</label>
         </div>
         {method === "bank_transfer" && (
@@ -381,6 +442,14 @@ export default function Billing() {
         )}
         {current?.billing_status === "active" && current.billing_provider === "stripe" && (
           <p className="billing-note">Your card plan is active and set to {current.auto_renew ? "renew automatically" : "end after this paid period"}.</p>
+        )}
+        {current?.billing_status === "active" && current.billing_provider === "paystack" && (
+          <p className="billing-note">
+            Your Paystack payment is active through{" "}
+            {current.current_period_end
+              ? new Date(current.current_period_end).toLocaleDateString()
+              : "the end of the paid period"}. It will not renew automatically.
+          </p>
         )}
         <button
           className="billing-submit"

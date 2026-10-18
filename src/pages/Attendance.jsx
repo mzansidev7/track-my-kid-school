@@ -46,7 +46,7 @@ function Attendance() {
       attendanceStudents.map((student) => ({
         ...student,
         name: student.displayName,
-        id: student.displayId,
+        id: `STU: ${student.rawId.slice(0, 8)}`,
         grade: student.gradeLabel,
         className: "",
         guardian: student.guardianName,
@@ -66,6 +66,7 @@ function Attendance() {
   const filteredStudents = useMemo(
     () =>
       students.filter((student) => {
+        console.log({ student });
         const matchesQuery = `${student.name} ${student.id} ${student.guardian}`
           .toLowerCase()
           .includes(query.toLowerCase());
@@ -506,12 +507,36 @@ function Attendance() {
                           <strong>{student.guardian}</strong>
                         </td>
                         <td>{student.time}</td>
-                        <td>
+                        <td
+                          style={{
+                            cursor: student.parentReportedAbsence
+                              ? "pointer"
+                              : "default",
+                          }}
+                        >
                           <span
                             className={`attendance-status ${student.status.toLowerCase()}`}
+                            title={
+                              student.parentReportedAbsence
+                                ? `${student.absenceReason || "No reason provided"}`
+                                : undefined
+                            }
+                            aria-label={
+                              student.parentReportedAbsence
+                                ? `Absent. Parent reported: ${student.absenceReason || "No reason provided"}`
+                                : student.status
+                            }
                           >
                             {student.status}
                           </span>
+                          {student.parentReportedAbsence && (
+                            <small>
+                              Parent reported for{" "}
+                              {new Date(
+                                `${selectedDate}T00:00:00`,
+                              ).toLocaleDateString()}
+                            </small>
+                          )}
                         </td>
                         <td>
                           <div className="attendance-update">
@@ -523,6 +548,7 @@ function Attendance() {
                               }
                               onClick={() => setStatus(student, "Present")}
                               aria-label={`Mark ${student.name} present`}
+                              disabled={student.parentReportedAbsence}
                             >
                               <FiCheck />
                             </button>
@@ -534,6 +560,7 @@ function Attendance() {
                               }
                               onClick={() => setStatus(student, "Absent")}
                               aria-label={`Mark ${student.name} absent`}
+                              disabled={student.parentReportedAbsence}
                             >
                               <FiX />
                             </button>
@@ -543,6 +570,7 @@ function Attendance() {
                               }
                               onClick={() => setStatus(student, "Late")}
                               aria-label={`Mark ${student.name} late`}
+                              disabled={student.parentReportedAbsence}
                             >
                               <FiClock />
                             </button>

@@ -33,6 +33,19 @@ function getAuth() {
   }
 }
 
+function getCachedBilling(userId) {
+  try {
+    return (
+      JSON.parse(
+        localStorage.getItem(`schoolBillingCache:${userId || "current"}`) ||
+          "null",
+      )?.data || null
+    );
+  } catch {
+    return null;
+  }
+}
+
 function Students() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("All statuses");
@@ -46,7 +59,27 @@ function Students() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", lastname: "", grade: "" });
   const auth = getAuth();
+  const [authToken] = useState(() => auth.token || "");
   const cacheKey = `schoolDashboardCache:${auth.user?.id || "current"}`;
+  const billing = getCachedBilling(auth.user?.id);
+  const subscription = billing?.subscription;
+  const activePlan =
+    (subscription?.status === "active" &&
+      (!subscription?.current_period_end ||
+        new Date(subscription.current_period_end) > new Date())) ||
+    (subscription?.status === "past_due" &&
+      subscription?.grace_period_ends_at &&
+      new Date(subscription.grace_period_ends_at) > new Date()) ||
+    (subscription?.status === "canceled" &&
+      subscription?.current_period_end &&
+      new Date(subscription.current_period_end) > new Date());
+  const planSlug = activePlan
+    ? subscription.plan_slug
+    : billing?.trial?.included_plan_slug || "starter";
+  const plan = billing?.plans?.find((item) => item.slug === planSlug);
+  const learnerLimit =
+    plan?.learner_limit ??
+    (planSlug === "enterprise" ? null : billing?.trial?.starter_learner_limit ?? 250);
   const [dashboard, setDashboard] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(cacheKey) || "null")?.data || null;
@@ -57,14 +90,14 @@ function Students() {
 
   const loadDashboard = useCallback(async () => {
     const data = await apiRequest("/school/dashboard", {
-      headers: { Authorization: `Bearer ${auth.token || ""}` },
+      headers: { Authorization: `Bearer ${authToken}` },
     });
     localStorage.setItem(
       cacheKey,
       JSON.stringify({ data, timestamp: Date.now() }),
     );
     setDashboard(data);
-  }, [auth.token, cacheKey]);
+  }, [authToken, cacheKey]);
 
   const addStudent = async (event) => {
     event.preventDefault();
@@ -119,7 +152,11 @@ function Students() {
       closeStudentModal();
       await loadDashboard();
     } catch (error) {
-      showErrorAlert(error.message || "Unable to add student.");
+      showErrorAlert(
+        error.message === "SCHOOL_LEARNER_LIMIT_REACHED"
+          ? `Your ${plan?.name || planSlug} plan allows up to ${learnerLimit?.toLocaleString() || "the plan limit"} learners. Upgrade your subscription in Billing to add more.`
+          : error.message || "Unable to add student.",
+      );
     } finally {
       setSaving(false);
     }
@@ -465,6 +502,12 @@ function Students() {
             <p>
               Manage student profiles, guardians, and transport assignments.
             </p>
+            <small className="student-plan-limit">
+              {students.length} learner{students.length === 1 ? "" : "s"}
+              {learnerLimit !== null
+                ? ` · ${learnerLimit?.toLocaleString() || "250"} learner limit on ${plan?.name || planSlug} plan`
+                : " · Unlimited learners on Enterprise"}
+            </small>
           </div>
           <div className="students-actions">
             <button className="secondary-button" onClick={exportExcel}>
@@ -780,7 +823,8 @@ function Students() {
                 }
               />
               <input
-                placeholder="Grade"
+                placeholder="Grade / class (e.g. Grade 9A, Class B)"
+                aria-label="Grade or class"
                 value={form.grade}
                 onChange={(event) =>
                   setForm({ ...form, grade: event.target.value })

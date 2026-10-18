@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertCircle,
   FiAlertTriangle,
@@ -38,6 +38,17 @@ const readAuth = () => {
     return {};
   }
 };
+const authHeaderKey = "Authorization";
+const readIncidentRepliesCache = (key) => {
+  try {
+    const cached = JSON.parse(localStorage.getItem(key) || "null");
+    return cached && typeof cached === "object" && !Array.isArray(cached)
+      ? cached
+      : {};
+  } catch {
+    return {};
+  }
+};
 const categoryIcon = (category) => {
   if (category === "Emergency") return FiAlertTriangle;
   if (category === "Attendance") return FiUser;
@@ -71,6 +82,7 @@ function Incidents() {
   const auth = readAuth();
   const userId = auth.user?.id || "current";
   const cacheKey = `schoolIncidentsCache:${userId}`;
+  const repliesCacheKey = `${cacheKey}:replies`;
   const [incidents, setIncidents] = useState(() => {
     try {
       const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
@@ -97,10 +109,21 @@ function Incidents() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedIncident, setSelectedIncident] = useState(null);
+  const [incidentReplies, setIncidentReplies] = useState([]);
+  const [incidentRepliesCache, setIncidentRepliesCache] = useState(() =>
+    readIncidentRepliesCache(repliesCacheKey),
+  );
+  const [replyDraft, setReplyDraft] = useState("");
+  const [repliesLoading, setRepliesLoading] = useState(false);
+  const [replySaving, setReplySaving] = useState(false);
   const [dateFrom, setDateFrom] = useState(() =>
     localDate(dateOffset(new Date(), -6)),
   );
   const [dateTo, setDateTo] = useState(() => localDate(new Date()));
+  const selectedIncidentRef = useRef(selectedIncident);
+  useEffect(() => {
+    selectedIncidentRef.current = selectedIncident;
+  }, [selectedIncident]);
 
   const loadIncidents = useCallback(
     async (showRefreshing = false) => {
@@ -112,7 +135,7 @@ function Incidents() {
       setError("");
       try {
         const data = await apiRequest("/school/incidents", {
-          headers: { Authorization: `Bearer ${auth.token}` },
+          headers: { [authHeaderKey]: ["Bearer", auth.token].join(" ") },
         });
         const next = Array.isArray(data) ? data : [];
         localStorage.setItem(
@@ -136,11 +159,120 @@ function Incidents() {
   }, [loadIncidents]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(repliesCacheKey, JSON.stringify(incidentRepliesCache));
+    } catch (cacheError) {
+      console.warn("Could not cache school incident responses:", cacheError);
+    }
+  }, [incidentRepliesCache, repliesCacheKey]);
+
+  const loadIncidentReplies = useCallback(
+    async (incident, showLoading = false) => {
+      if (!auth.token || incident?.source !== "incident_report") return;
+      const incidentId = String(incident.source_id);
+      if (showLoading) setRepliesLoading(true);
+      try {
+        const data = await apiRequest(
+          `/school/incidents/${encodeURIComponent(incidentId)}/replies`,
+          { headers: { [authHeaderKey]: ["Bearer", auth.token].join(" ") } },
+        );
+        if (!Array.isArray(data)) {
+          throw new Error("Unable to load incident responses.");
+        }
+        setIncidentRepliesCache((current) => ({ ...current, [incidentId]: data }));
+        if (selectedIncidentRef.current?.source_id === incident.source_id) {
+          setIncidentReplies(data);
+        }
+      } catch (requestError) {
+        setError(requestError?.message || "Unable to load incident responses.");
+      } finally {
+        if (showLoading) setRepliesLoading(false);
+      }
+    },
+    [auth.token],
+  );
+
+  const openIncident = async (incident) => {
+    selectedIncidentRef.current = incident;
+    setSelectedIncident(incident);
+    const cachedReplies = incidentRepliesCache[String(incident.source_id)];
+    setIncidentReplies(Array.isArray(cachedReplies) ? cachedReplies : []);
+    setReplyDraft("");
+    if (incident.source !== "incident_report") return;
+
+    setRepliesLoading(true);
+    setError("");
+    try {
+      const data = await apiRequest(
+        `/school/incidents/${encodeURIComponent(incident.source_id)}/replies`,
+        { headers: { [authHeaderKey]: ["Bearer", auth.token].join(" ") } },
+      );
+      if (!Array.isArray(data)) {
+        throw new Error("Unable to load incident responses.");
+      }
+      setIncidentReplies(data);
+      setIncidentRepliesCache((current) => ({
+        ...current,
+        [String(incident.source_id)]: data,
+      }));
+    } catch (requestError) {
+      setError(requestError?.message || "Unable to load incident responses.");
+    } finally {
+      setRepliesLoading(false);
+    }
+  };
+
+  const sendIncidentReply = async () => {
+    if (
+      !selectedIncident ||
+      selectedIncident.source !== "incident_report" ||
+      selectedIncident.recipient_type === "support" ||
+      selectedIncident.status === "Resolved" ||
+      !replyDraft.trim() ||
+      replySaving
+    ) {
+      return;
+    }
+    setReplySaving(true);
+    setError("");
+    try {
+      const reply = await apiRequest(
+        `/school/incidents/${encodeURIComponent(selectedIncident.source_id)}/replies`,
+        {
+          method: "POST",
+          headers: { [authHeaderKey]: ["Bearer", auth.token].join(" ") },
+          body: JSON.stringify({ body: replyDraft.trim() }),
+        },
+      );
+      const nextReplies = [...incidentReplies, reply];
+      setIncidentReplies(nextReplies);
+      setIncidentRepliesCache((current) => ({
+        ...current,
+        [String(selectedIncident.source_id)]: nextReplies,
+      }));
+      setReplyDraft("");
+    } catch (requestError) {
+      setError(requestError?.message || "Unable to send incident response.");
+    } finally {
+      setReplySaving(false);
+    }
+  };
+
+  useEffect(() => {
     if (!supabaseClient || !auth.user?.id) return undefined;
     let refreshTimer;
+    const refreshSelected = () => {
+      const selected = selectedIncidentRef.current;
+      if (selected?.source === "incident_report") {
+        void loadIncidentReplies(selected);
+      }
+    };
     const queueRefresh = () => {
       window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => void loadIncidents(true), 300);
+      refreshTimer = window.setTimeout(() => {
+        void loadIncidents(true);
+        refreshSelected();
+      }, 300);
     };
     const channel = supabaseClient
       .channel(`school-incidents:${auth.user.id}`)
@@ -161,6 +293,19 @@ function Incidents() {
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "support_dashboard_events" },
+        (payload) => {
+          const resourceType = payload.new?.resource_type;
+          if (
+            resourceType === "incident_reports" ||
+            resourceType === "incident_report_replies"
+          ) {
+            queueRefresh();
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "children" },
         queueRefresh,
       )
@@ -169,11 +314,16 @@ function Incidents() {
           console.warn("School incident realtime unavailable:", status);
         }
       });
+    const fallbackInterval = window.setInterval(() => {
+      void loadIncidents(true);
+      refreshSelected();
+    }, 30_000);
     return () => {
       window.clearTimeout(refreshTimer);
+      window.clearInterval(fallbackInterval);
       void supabaseClient.removeChannel(channel);
     };
-  }, [auth.user?.id, loadIncidents]);
+  }, [auth.user?.id, loadIncidentReplies, loadIncidents]);
 
   const periodIncidents = useMemo(
     () =>
@@ -526,7 +676,7 @@ function Incidents() {
                           type="button"
                           className="incident-action"
                           aria-label={`View ${incident.title}`}
-                          onClick={() => setSelectedIncident(incident)}
+                          onClick={() => void openIncident(incident)}
                         >
                           <FiEye />
                         </button>
@@ -741,6 +891,71 @@ function Incidents() {
                 </div>
               )}
             </dl>
+            {selectedIncident.source === "incident_report" && (
+              <section className="incident-response">
+                <div className="incident-response-heading">
+                  <h3>Responses</h3>
+                  <span>
+                    {selectedIncident.recipient_type === "support"
+                      ? "Support only"
+                      : "School and Support"}
+                  </span>
+                </div>
+                {repliesLoading ? (
+                  <p className="incident-response-empty">Loading responses…</p>
+                ) : incidentReplies.length ? (
+                  <div className="incident-response-list">
+                    {incidentReplies.map((reply) => (
+                      <article className="incident-response-item" key={reply.id}>
+                        <div>
+                          <strong>{reply.users?.name || "Incident team"}</strong>
+                          <time>{new Date(reply.created_at).toLocaleString()}</time>
+                        </div>
+                        <p>{reply.body}</p>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="incident-response-empty">No responses yet.</p>
+                )}
+                {selectedIncident.recipient_type === "support" ? (
+                  <p className="incident-response-note">
+                    This report was sent to Support. The school can view responses, but only Support can reply.
+                  </p>
+                ) : selectedIncident.status === "Resolved" ? (
+                  <p className="incident-response-note">
+                    This report is closed and can no longer receive responses.
+                  </p>
+                ) : (
+                  <form
+                    className="incident-response-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void sendIncidentReply();
+                    }}
+                  >
+                    <label htmlFor="incident-response-draft">
+                      Reply to the reporter
+                    </label>
+                    <textarea
+                      id="incident-response-draft"
+                      value={replyDraft}
+                      onChange={(event) => setReplyDraft(event.target.value)}
+                      placeholder="Write an update or request more information..."
+                      maxLength={3000}
+                      rows={4}
+                      disabled={replySaving}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!replyDraft.trim() || replySaving || repliesLoading}
+                    >
+                      {replySaving ? "Sending..." : "Send response"}
+                    </button>
+                  </form>
+                )}
+              </section>
+            )}
           </section>
         </div>
       )}

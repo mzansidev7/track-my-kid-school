@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertCircle,
+  FiBookOpen,
   FiCalendar,
   FiCheckCircle,
   FiChevronLeft,
@@ -582,6 +583,12 @@ export default function Trips() {
 
   const startTrip = (trip = null) => {
     setError("");
+    if (!trip && resources.learners.length === 0) {
+      showErrorAlert(
+        "Add at least one student to your school before creating a trip.",
+      );
+      return;
+    }
     setDestinationLocked(Boolean(trip));
     setEditingTrip(trip);
     setGradeFilter("all");
@@ -758,6 +765,10 @@ export default function Trips() {
   const submitTrip = async (event) => {
     event.preventDefault();
     setError("");
+    if (!editingTrip && resources.learners.length === 0) {
+      setError("Add at least one student to your school before creating a trip.");
+      return;
+    }
     if (!tripForm.departure_at || !tripForm.return_at) {
       setError("Enter both the departure and return date and time.");
       return;
@@ -1227,6 +1238,14 @@ export default function Trips() {
             <button
               type="button"
               className="trip-secondary"
+              onClick={() => setModal("trip-docs")}
+              aria-haspopup="dialog"
+            >
+              <FiBookOpen /> Docs
+            </button>
+            <button
+              type="button"
+              className="trip-secondary"
               onClick={() => setModal("vehicles")}
             >
               <FiTruck /> School vehicles
@@ -1240,6 +1259,150 @@ export default function Trips() {
             </button>
           </div>
         </section>
+        {modal === "trip-docs" && (
+          <div
+            className="trip-modal-backdrop"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setModal(null);
+            }}
+          >
+            <section
+              className="trip-modal trip-docs-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="trip-docs-title"
+            >
+              <header>
+                <div>
+                  <p className="page-kicker">QUICK GUIDE</p>
+                  <h2 id="trip-docs-title">How School Trips work</h2>
+                  <p>
+                    Set up the trip, choose learners and vehicles, then keep
+                    families informed as plans progress.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="trip-modal-close"
+                  onClick={() => setModal(null)}
+                  aria-label="Close trip guide"
+                >
+                  <FiX />
+                </button>
+              </header>
+              <div className="trip-docs-content">
+                <section>
+                  <h3>Creating and running a trip</h3>
+                  <ol>
+                    <li>
+                      Select <strong>Add trip</strong> and enter the trip
+                      details, destination, times, price and registration
+                      limits.
+                    </li>
+                    <li>
+                      Select the participating learners. Add one or more school
+                      vehicles and assign learners within the available seat
+                      capacity.
+                    </li>
+                    <li>
+                      Save as a <strong>Draft</strong> while details are still
+                      being prepared, or open registration when families can
+                      sign up.
+                    </li>
+                    <li>
+                      Update the status as arrangements progress. Status
+                      changes are sent to participating families; a vehicle is
+                      required to confirm or start a trip.
+                    </li>
+                  </ol>
+                </section>
+                <section>
+                  <h3>Trip statuses</h3>
+                  <dl className="trip-docs-status-list">
+                    <div>
+                      <dt>Draft</dt>
+                      <dd>
+                        Saved for school staff to finish. It is unpublished
+                        and families cannot register.
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Registration open</dt>
+                      <dd>
+                        Published and accepting registrations until the
+                        registration deadline or capacity is reached.
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Confirmed</dt>
+                      <dd>
+                        The trip is confirmed. It must have a vehicle and
+                        eligible learners (registered learners for free trips;
+                        paid learners for paid trips).
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Preparing</dt>
+                      <dd>
+                        The school is finalising arrangements. Eligible
+                        learners are required; a vehicle can still be added
+                        later.
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>In progress</dt>
+                      <dd>
+                        The trip is underway. A vehicle and eligible learners
+                        are required; live vehicle tracking is available when
+                        location is being shared.
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Completed</dt>
+                      <dd>
+                        The trip has finished. This is a final status.
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Cancelled</dt>
+                      <dd>
+                        The trip will not go ahead. This is a final status and
+                        families are notified.
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+                <section>
+                  <h3>School vehicle statuses</h3>
+                  <dl className="trip-docs-status-list">
+                    <div>
+                      <dt>Available</dt>
+                      <dd>Ready to be assigned to a trip.</dd>
+                    </div>
+                    <div>
+                      <dt>Assigned</dt>
+                      <dd>Currently allocated to a trip.</dd>
+                    </div>
+                    <div>
+                      <dt>Maintenance</dt>
+                      <dd>Under maintenance and not available for new assignments.</dd>
+                    </div>
+                    <div>
+                      <dt>Inactive</dt>
+                      <dd>Not currently in service and unavailable for assignments.</dd>
+                    </div>
+                  </dl>
+                </section>
+                <p className="trip-docs-note">
+                  Trips without a vehicle can remain drafts or be marked
+                  preparing, but cannot be confirmed or started. Check vehicle
+                  capacity against the trip’s learner limits before publishing.
+                </p>
+              </div>
+            </section>
+          </div>
+        )}
         <section className="trip-metrics">
           <article>
             <span className="trip-metric-icon purple">
@@ -2307,11 +2470,11 @@ export default function Trips() {
                       />
                     </label>
                     <label>
-                      VIN / chassis number
+                      VIN / chassis number (optional)
                       <input
                         value={vehicleForm.vin}
                         onChange={setVehicleField("vin")}
-                        placeholder="Optional"
+                        placeholder="Enter if available"
                       />
                     </label>
                   </div>

@@ -657,6 +657,110 @@
   font-size: 11px;
   font-weight: 650;
 }
+.incident-response {
+  margin-top: 18px;
+  border-top: 1px solid #e5eaf0;
+  padding-top: 16px;
+}
+.incident-response-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.incident-response-heading h3 {
+  margin: 0;
+  color: #17204d;
+  font-size: 14px;
+}
+.incident-response-heading span {
+  border-radius: 20px;
+  padding: 5px 9px;
+  background: #f0e9ff;
+  color: #6030d2;
+  font-size: 9px;
+  font-weight: 750;
+}
+.incident-response-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.incident-response-item {
+  border: 1px solid #e5eaf0;
+  border-radius: 7px;
+  padding: 10px;
+  background: #f8fafc;
+}
+.incident-response-item > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.incident-response-item strong {
+  color: #263b5b;
+  font-size: 10px;
+}
+.incident-response-item time {
+  color: #64748b;
+  font-size: 9px;
+}
+.incident-response-item p {
+  margin: 7px 0 0;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.incident-response-empty,
+.incident-response-note {
+  margin: 0 0 10px;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.incident-response-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.incident-response-form label {
+  color: #263b5b;
+  font-size: 10px;
+  font-weight: 700;
+}
+.incident-response-form textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #dce4eb;
+  border-radius: 7px;
+  padding: 10px;
+  color: #334155;
+  font: inherit;
+  font-size: 11px;
+}
+.incident-response-form textarea:focus {
+  outline: 2px solid rgb(96 48 210 / 18%);
+  border-color: #6934df;
+}
+.incident-response-form button {
+  justify-self: end;
+  border: 1px solid #6132d7;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #6132d7;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.incident-response-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 @media (max-width: 1050px) {
   .incident-metrics {
     grid-template-columns: repeat(3, 1fr);
