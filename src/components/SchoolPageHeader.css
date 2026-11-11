@@ -1,0 +1,119 @@
+.school-page-heading.school-page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 4px 0 24px;
+  padding: 4px 2px 0;
+}
+
+.school-page-heading .school-page-heading-copy {
+  position: relative;
+  min-width: 0;
+  padding-left: 16px;
+}
+
+.school-page-heading .school-page-heading-copy::before {
+  position: absolute;
+  inset: 3px auto 3px 0;
+  width: 3px;
+  border-radius: 999px;
+  background: #0f766e;
+  content: "";
+}
+
+.school-page-heading.school-page-heading h1 {
+  margin: 0 0 5px;
+  color: #0f172a;
+  font-size: 30px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.school-page-heading .school-page-heading-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.school-page-heading-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  border: 1px solid #d5ebe6;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #effaf7, #e4f2ee);
+  color: #0f766e;
+  font-size: 19px;
+  box-shadow: 0 4px 12px rgb(15 118 110 / 8%);
+}
+
+.school-page-heading-icon svg {
+  display: block;
+}
+
+.school-page-heading.school-page-heading h2 {
+  margin: 0 0 5px;
+  color: #0f172a;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.school-page-heading.school-page-heading .page-kicker {
+  margin: 0 0 6px;
+  color: #0f766e;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+
+.school-page-heading .school-page-heading-copy > p:last-of-type {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.school-page-heading .school-page-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.school-page-heading .school-page-heading-actions > button {
+  box-sizing: border-box;
+  min-width: 92px;
+  height: 35px;
+  min-height: 35px;
+  justify-content: center;
+  padding: 0 13px;
+  font-size: 11px;
+}
+
+.school-page-heading.school-page-heading > .school-page-heading-actions {
+  margin-right: 0;
+}
+
+@media (max-width: 720px) {
+  .school-page-heading.school-page-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .school-page-heading .school-page-heading-actions {
+    justify-content: flex-start;
+  }
+
+  .school-page-heading.school-page-heading h1 {
+    font-size: 26px;
+  }
+}

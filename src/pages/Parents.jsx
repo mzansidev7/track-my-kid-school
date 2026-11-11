@@ -3,7 +3,6 @@ import {
   FiArrowDown,
   FiArrowUp,
   FiDownload,
-  FiEye,
   FiMail,
   FiMessageSquare,
   FiMoreHorizontal,
@@ -20,6 +19,9 @@ import {
   downloadSchoolReport,
   getCachedSchoolReportProfile,
 } from "../utils/schoolReport";
+import SchoolPageHeader from "../components/SchoolPageHeader";
+import { PresenceStatus } from "../presence/PresenceIndicator";
+import { usePresence } from "../presence/PresenceContext";
 
 const tabs = ["All Parents", "Active", "Inactive", "Verified", "Unverified"];
 
@@ -37,6 +39,7 @@ function Parents() {
   const [selectedParent, setSelectedParent] = useState(null);
   const [selectedView, setSelectedView] = useState("details");
   const { parents, loading } = useParents();
+  const { ready: presenceReady, onlineUserIds } = usePresence();
   const filteredParents = useMemo(
     () =>
       parents.filter((parent) => {
@@ -104,6 +107,11 @@ function Parents() {
   const activeParents = parents.filter(
     (parent) => parent.status === "Active",
   ).length;
+  const onlineParents = parents.filter((parent) => {
+    const userId = parent.user_id || parent.users?.id;
+    return userId && onlineUserIds.has(String(userId));
+  }).length;
+  const offlineParents = Math.max(0, parents.length - onlineParents);
   const linkedChildren = parents.reduce(
     (total, parent) => total + parent.children.length,
     0,
@@ -204,21 +212,24 @@ function Parents() {
   return (
     <>
       <div className="portal-content parents-content">
-        <section className="parents-heading">
-          <div>
-            <p className="page-kicker">FAMILY DIRECTORY</p>
-            <h1>Parents</h1>
-            <p>Manage parents and guardians of registered students.</p>
-          </div>
-          <div className="parents-actions">
-            <button className="parent-secondary" onClick={exportPdf}>
-              <FiDownload /> Export
-            </button>
-            {/* <button className="parent-primary">
+        <SchoolPageHeader
+          className="parents-heading"
+          actionsClassName="parents-actions"
+          eyebrow="FAMILY DIRECTORY"
+          titleIcon={<span className="school-page-heading-icon"><FiUsers /></span>}
+          title="Parents"
+          description="Manage parents and guardians of registered students."
+          actions={
+            <>
+              <button className="parent-secondary" onClick={exportPdf}>
+                <FiDownload /> Export
+              </button>
+              {/* <button className="parent-primary">
               <FiPlus /> Add parent
             </button> */}
-          </div>
-        </section>
+            </>
+          }
+        />
         <section className="parent-metrics">
           <article>
             <span className="parent-icon purple">
@@ -396,6 +407,9 @@ function Parents() {
                               <div>
                                 <strong>{parent.name}</strong>
                                 <small>ID: {parent.id.slice(0, 8)}</small>
+                                <PresenceStatus
+                                  userId={parent.user_id || parent.users?.id}
+                                />
                               </div>
                             </div>
                           </td>
@@ -545,16 +559,7 @@ function Parents() {
                                     <FiMessageSquare />
                                     <span>Send SMS</span>
                                   </a>
-                                  <button
-                                    type="button"
-                                    className="parent-menu-item button-link"
-                                    onClick={() =>
-                                      openParentView(parent, "details")
-                                    }
-                                  >
-                                    <FiEye />
-                                    <span>View details</span>
-                                  </button>
+
                                   <button
                                     type="button"
                                     className="parent-menu-item button-link"
@@ -644,6 +649,14 @@ function Parents() {
               </div>
               <div className="parent-legend">
                 <p>
+                  <i className="dot online-dot" />
+                  Online <b>{presenceReady ? onlineParents : "—"}</b>
+                </p>
+                <p>
+                  <i className="dot offline-dot" />
+                  Offline <b>{presenceReady ? offlineParents : "—"}</b>
+                </p>
+                <p>
                   <i className="dot active-dot" />
                   Active <b>{activeParents}</b>
                 </p>
@@ -661,6 +674,11 @@ function Parents() {
                   <i className="dot unverified-dot" />
                   Unverified <b>{parents.length - activeParents}</b>
                 </p>
+                {!presenceReady && (
+                  <small className="parent-presence-note">
+                    Connecting to live presence...
+                  </small>
+                )}
               </div>
             </section>
           </aside>

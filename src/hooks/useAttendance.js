@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
 
@@ -60,35 +60,56 @@ export function useAttendance(date = today()) {
       return [];
     }
   });
+  const [overviewLoading, setOverviewLoading] = useState(() => {
+    try {
+      return !JSON.parse(localStorage.getItem(overviewCacheKey) || "null")?.data;
+    } catch {
+      return true;
+    }
+  });
+  const [overviewError, setOverviewError] = useState("");
+  const attendanceRequestId = useRef(0);
 
   const reload = useCallback(async () => {
+    const requestId = ++attendanceRequestId.current;
+    setLoading(true);
     try {
       const next = await apiRequest(`/school/attendance?date=${date}`, {
         headers: { Authorization: `Bearer ${auth.token || ""}` },
       });
-      localStorage.setItem(
-        cacheKey,
-        JSON.stringify({ data: next, timestamp: Date.now() }),
-      );
-      setData(next);
+      if (requestId === attendanceRequestId.current) {
+        localStorage.setItem(
+          cacheKey,
+          JSON.stringify({ data: next, timestamp: Date.now() }),
+        );
+        setData(next);
+      }
       return next;
     } finally {
-      setLoading(false);
+      if (requestId === attendanceRequestId.current) setLoading(false);
     }
   }, [auth.token, cacheKey, date]);
 
   const reloadOverview = useCallback(async () => {
-    const response = await apiRequest(
+    setOverviewError("");
+    try {
+      const response = await apiRequest(
       `/school/attendance/overview?start_date=${overviewRange.startDate}&end_date=${overviewRange.endDate}`,
       { headers: { Authorization: `Bearer ${auth.token || ""}` } },
     );
-    const days = Array.isArray(response.days) ? response.days : [];
-    localStorage.setItem(
-      overviewCacheKey,
-      JSON.stringify({ data: days, timestamp: Date.now() }),
-    );
-    setOverviewDays(days);
-    return days;
+      const days = Array.isArray(response.days) ? response.days : [];
+      localStorage.setItem(
+        overviewCacheKey,
+        JSON.stringify({ data: days, timestamp: Date.now() }),
+      );
+      setOverviewDays(days);
+      return days;
+    } catch (error) {
+      setOverviewError("Could not check attendance for this week.");
+      throw error;
+    } finally {
+      setOverviewLoading(false);
+    }
   }, [
     auth.token,
     overviewCacheKey,
@@ -97,6 +118,8 @@ export function useAttendance(date = today()) {
   ]);
 
   useEffect(() => {
+    // Load the selected date's register from the API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     reload().catch(() => setLoading(false));
   }, [reload]);
 
@@ -131,6 +154,7 @@ export function useAttendance(date = today()) {
         { event: "*", schema: "public", table: "absence_reports" },
         () => {
           void reload();
+          void reloadOverview();
         },
       )
       .subscribe();
@@ -227,6 +251,8 @@ export function useAttendance(date = today()) {
     students,
     loading,
     overviewDays,
+    overviewLoading,
+    overviewError,
     setStatus,
     reload,
   };

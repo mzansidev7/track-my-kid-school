@@ -136,6 +136,7 @@ export default function PortalHeader() {
     localStorage.removeItem("schoolAuth");
     localStorage.removeItem(`schoolProfileCache:${auth.user?.id || "current"}`);
     sessionStorage.removeItem("schoolAuth");
+    window.dispatchEvent(new Event("school-auth-changed"));
     try {
       await clearSupabaseSession();
     } catch (error) {

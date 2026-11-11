@@ -18,6 +18,7 @@ import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import "../styles/notifications.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 const tabs = [
   "All",
@@ -56,13 +57,21 @@ const toViewModel = (notification) => ({
   ...notification,
   text: notification.message,
   unread: notification.is_read !== true,
-  isSupportReply: Boolean(notification.support_ticket_id) ||
+  isSupportReply:
+    Boolean(notification.support_ticket_id) ||
     notification.title?.startsWith("Support replied:"),
   time: notification.created_at
     ? new Date(notification.created_at).toLocaleString()
     : "Just now",
   ...notificationPresentation(notification.type),
 });
+
+const cacheNotifications = (cacheKey, notifications) => {
+  localStorage.setItem(
+    cacheKey,
+    JSON.stringify({ data: notifications, timestamp: Date.now() }),
+  );
+};
 
 function Notifications() {
   const navigate = useNavigate();
@@ -167,6 +176,18 @@ function Notifications() {
   }, [auth.user?.id, loadNotifications]);
 
   const unreadCount = notifications.filter((item) => item.unread).length;
+  const publishUnreadCount = (count) => {
+    const nextCount = Math.max(0, count);
+    localStorage.setItem(
+      `schoolUnreadNotifications:${auth.user?.id || "current"}`,
+      String(nextCount),
+    );
+    window.dispatchEvent(
+      new CustomEvent("school-unread-notifications-updated", {
+        detail: { count: nextCount },
+      }),
+    );
+  };
   const alertCount = notifications.filter((item) =>
     ["emergency", "vehicle_delayed", "delay_warning", "missed_stop"].includes(
       item.type,
@@ -211,12 +232,15 @@ function Notifications() {
         method: "PUT",
         headers: { Authorization: `Bearer ${auth.token || ""}` },
       });
-      setNotifications((current) =>
-        current.map((notification) =>
-          notification.id === item.id
-            ? { ...notification, unread: false, is_read: true }
-            : notification,
-        ),
+      const nextNotifications = notifications.map((notification) =>
+        notification.id === item.id
+          ? { ...notification, unread: false, is_read: true }
+          : notification,
+      );
+      setNotifications(nextNotifications);
+      cacheNotifications(cacheKey, nextNotifications);
+      publishUnreadCount(
+        nextNotifications.filter((notification) => notification.unread).length,
       );
       setSelected((current) =>
         current?.id === item.id
@@ -235,11 +259,50 @@ function Notifications() {
 
   const markAllAsRead = async () => {
     if (markingAll || !unreadCount) return;
+    const unreadNotifications = notifications.filter((item) => item.unread);
+    const nextNotifications = notifications.map((item) => ({
+      ...item,
+      unread: false,
+      is_read: true,
+    }));
+    setNotifications(nextNotifications);
+    setSelected((current) =>
+      current ? { ...current, unread: false, is_read: true } : current,
+    );
+    cacheNotifications(cacheKey, nextNotifications);
+    publishUnreadCount(0);
     setMarkingAll(true);
+    setError("");
     try {
-      await Promise.all(
-        notifications.filter((item) => item.unread).map(markAsRead),
+      const results = await Promise.allSettled(
+        unreadNotifications.map((item) =>
+          apiRequest(`/school/notifications/${item.id}/read`, {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${auth.token || ""}` },
+          }),
+        ),
       );
+      const failedIds = new Set(
+        results.flatMap((result, index) =>
+          result.status === "rejected" ? [unreadNotifications[index].id] : [],
+        ),
+      );
+      if (failedIds.size) {
+        const rolledBackNotifications = nextNotifications.map((item) =>
+          failedIds.has(item.id) ? { ...item, unread: true, is_read: false } : item,
+        );
+        setNotifications(rolledBackNotifications);
+        setSelected((current) =>
+          current && failedIds.has(current.id)
+            ? { ...current, unread: true, is_read: false }
+            : current,
+        );
+        cacheNotifications(cacheKey, rolledBackNotifications);
+        publishUnreadCount(failedIds.size);
+        setError(
+          `Could not mark ${failedIds.size} notification${failedIds.size === 1 ? "" : "s"} as read. Please try again.`,
+        );
+      }
     } finally {
       setMarkingAll(false);
     }
@@ -272,32 +335,35 @@ function Notifications() {
         </div>
       </header> */}
       <div className="portal-content notifications-content">
-        <section className="notifications-heading">
-          <div>
-            <p className="page-kicker">SCHOOL ALERTS</p>
-            <h1>Notifications</h1>
-            <p>Stay updated with all important activities and alerts.</p>
-          </div>
-          <div className="notifications-actions">
-            <button
-              className="mark-read"
-              type="button"
-              onClick={markAllAsRead}
-              disabled={!unreadCount || markingAll}
-            >
-              {markingAll ? (
-                <>
-                  <span className="notification-spinner" aria-hidden="true" />
-                  Marking as read...
-                </>
-              ) : (
-                <>
-                  <FiCheckCircle /> Mark all as read
-                </>
-              )}
-            </button>
-          </div>
-        </section>
+        <SchoolPageHeader
+          className="notifications-heading"
+          actionsClassName="notifications-actions"
+          eyebrow="SCHOOL ALERTS"
+          titleIcon={<span className="school-page-heading-icon"><FiBell /></span>}
+          title="Notifications"
+          description="Stay updated with all important activities and alerts."
+          actions={
+            <>
+              <button
+                className="mark-read"
+                type="button"
+                onClick={markAllAsRead}
+                disabled={!unreadCount || markingAll}
+              >
+                {markingAll ? (
+                  <>
+                    <span className="notification-spinner" aria-hidden="true" />
+                    Marking as read...
+                  </>
+                ) : (
+                  <>
+                    <FiCheckCircle /> Mark all as read
+                  </>
+                )}
+              </button>
+            </>
+          }
+        />
         <section className="notification-metrics">
           <article>
             <span className="notification-metric purple">

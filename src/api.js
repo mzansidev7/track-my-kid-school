@@ -40,7 +40,7 @@ const getStoredSchoolToken = () => {
 };
 
 const isPublicAuthRequest = (path) =>
-  /\/(login|create-user|verify-otp|resend-otp|request-registration-link|health)(?:[?#]|$)/i.test(
+  /\/(login|create-user|verify-otp|resend-otp|request-registration-link|forgot-password|reset-password|health)(?:[?#]|$)/i.test(
     path,
   );
 
@@ -61,6 +61,7 @@ const clearExpiredSchoolSession = (token) => {
   expiredToken = token;
   localStorage.removeItem("schoolAuth");
   sessionStorage.removeItem("schoolAuth");
+  window.dispatchEvent(new Event("school-auth-changed"));
   void clearSupabaseSession().catch((error) => {
     console.error("Could not clear Supabase Auth session:", error);
   });

@@ -11,14 +11,13 @@ import {
   FiNavigation,
   FiSettings,
   FiTruck,
-  // FiUserCheck,
+  FiUserCheck,
   FiUserPlus,
   FiUsers,
 } from "react-icons/fi";
 import { FaBus } from "react-icons/fa";
 import { NavLink } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
-import DocsButton from "../DocsButton";
 import { apiRequest } from "../../api";
 import { supabaseClient } from "../../supabaseClient";
 import {
@@ -30,39 +29,23 @@ import logo from "../../assets/images/logo.png";
 import "../../styles/sidebar.css";
 
 const menuItems = [
-  { title: "Dashboard ✓", icon: <FiHome />, path: "/dashboard" },
-  { title: "Students ✓", icon: <FiUsers />, path: "/students" },
-  // { title: "Drivers", icon: <FiUserCheck />, path: "/drivers" },
-  // { title: "Vehicles", icon: <FaBus />, path: "/vehicles" },
+  { title: "Dashboard", icon: <FiHome />, path: "/dashboard" },
+  { title: "Announcements", icon: <FiMessageSquare />, path: "/announcements" },
+  { title: "Attendance", icon: <FiActivity />, path: "/attendance" },
+  { title: "Drivers", icon: <FiUserCheck />, path: "/drivers" },
+  { title: "Incidents", icon: <FiAlertTriangle />, path: "/incidents" },
+  { title: "Live Tracking", icon: <FiNavigation />, path: "/tracking" },
+  { title: "Messages", icon: <FiMessageSquare />, path: "/messages" },
+  { title: "Notifications", icon: <FiBell />, path: "/notifications" },
+  { title: "Parents", icon: <FiUsers />, path: "/parents" },
+  { title: "Reports", icon: <FiFileText />, path: "/reports" },
   { title: "Routes", icon: <FiMap />, path: "/routes" },
-  { title: "Trips ✓", icon: <FiTruck />, path: "/trips" },
-  { title: "Live Tracking ✓✓", icon: <FiNavigation />, path: "/tracking" },
-  { title: "Attendance ✓", icon: <FiActivity />, path: "/attendance" },
-  { title: "Parents ✓", icon: <FiUsers />, path: "/parents" },
-  { title: "Staff Members ✓", icon: <FiUserPlus />, path: "/members" },
-  {
-    title: "Messages ✓",
-    icon: <FiMessageSquare />,
-    path: "/messages",
-  },
-  {
-    title: "Announcements ✓",
-    icon: <FiMessageSquare />,
-    path: "/announcements",
-  },
-  {
-    title: "Notifications ✓",
-    icon: <FiBell />,
-    path: "/notifications",
-  },
-  {
-    title: "Support Tickets",
-    icon: <FiLifeBuoy />,
-    path: "/support",
-  },
-  { title: "Reports ✓", icon: <FiFileText />, path: "/reports" },
-  { title: "Incidents ✓", icon: <FiAlertTriangle />, path: "/incidents" },
-  { title: "Settings ✓", icon: <FiSettings />, path: "/settings" },
+  { title: "Staff Members", icon: <FiUserPlus />, path: "/members" },
+  { title: "Students", icon: <FiUsers />, path: "/students" },
+  { title: "Support Tickets", icon: <FiLifeBuoy />, path: "/support" },
+  { title: "Trips", icon: <FiTruck />, path: "/trips" },
+  { title: "Vehicles", icon: <FaBus />, path: "/vehicles" },
+  { title: "Settings", icon: <FiSettings />, path: "/settings" },
 ];
 
 function readSession() {
@@ -175,17 +158,27 @@ export default function Sidebar() {
       return 0;
     }
   });
+  const [pendingAttendance, setPendingAttendance] = useState(0);
 
   const refreshUnreadCounts = useCallback(async () => {
     if (!session.token || !userId) return;
 
     const headers = { Authorization: `Bearer ${session.token}` };
-    const [notificationsResult, conversationsResult] = await Promise.allSettled(
-      [
-        apiRequest("/school/notifications?limit=1000", { headers }),
-        apiRequest("/school/conversations", { headers }),
-      ],
-    );
+    const today = new Date();
+    const attendanceDate = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-");
+    const [
+      notificationsResult,
+      conversationsResult,
+      attendanceResult,
+    ] = await Promise.allSettled([
+      apiRequest("/school/notifications?limit=1000", { headers }),
+      apiRequest("/school/conversations", { headers }),
+      apiRequest(`/school/attendance?date=${attendanceDate}`, { headers }),
+    ]);
 
     if (notificationsResult.status === "fulfilled") {
       const notifications = Array.isArray(notificationsResult.value)
@@ -216,6 +209,25 @@ export default function Sidebar() {
       );
       setUnreadMessages(count);
       localStorage.setItem(messageCacheKey, String(count));
+    }
+
+    if (attendanceResult.status === "fulfilled") {
+      const { students = [], records = [], absenceReports = [] } =
+        attendanceResult.value || {};
+      const handledStudentIds = new Set([
+        ...records.map((record) => String(record.child_id)),
+        ...absenceReports.map((report) => String(report.child_id)),
+      ]);
+      setPendingAttendance(
+        students.filter(
+          (student) => !handledStudentIds.has(String(student.id)),
+        ).length,
+      );
+    } else {
+      console.error(
+        "Could not load pending school attendance:",
+        attendanceResult.reason,
+      );
     }
   }, [messageCacheKey, notificationCacheKey, session.token, userId]);
 
@@ -254,6 +266,21 @@ export default function Sidebar() {
         { event: "*", schema: "public", table: "conversations" },
         scheduleCountRefresh,
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "attendance_records" },
+        scheduleCountRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "absence_reports" },
+        scheduleCountRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "children" },
+        scheduleCountRefresh,
+      )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn("Sidebar unread-count realtime unavailable:", status);
@@ -262,13 +289,34 @@ export default function Sidebar() {
 
     const handleWindowFocus = () => void refreshUnreadCounts();
     window.addEventListener("focus", handleWindowFocus);
+    const refreshInterval = window.setInterval(refreshUnreadCounts, 300000);
     return () => {
       window.clearTimeout(initialRefreshTimer);
       window.clearTimeout(refreshTimer);
+      window.clearInterval(refreshInterval);
       window.removeEventListener("focus", handleWindowFocus);
       void supabaseClient.removeChannel(channel);
     };
   }, [refreshUnreadCounts, userId]);
+
+  useEffect(() => {
+    const handleUnreadCountUpdate = (event) => {
+      const count = Number(event.detail?.count);
+      if (!Number.isFinite(count)) return;
+      setUnreadNotifications(Math.max(0, count));
+      localStorage.setItem(notificationCacheKey, String(Math.max(0, count)));
+    };
+    window.addEventListener(
+      "school-unread-notifications-updated",
+      handleUnreadCountUpdate,
+    );
+    return () => {
+      window.removeEventListener(
+        "school-unread-notifications-updated",
+        handleUnreadCountUpdate,
+      );
+    };
+  }, [notificationCacheKey]);
 
   useEffect(() => {
     const handleProfileUpdate = (event) => {
@@ -299,7 +347,10 @@ export default function Sidebar() {
         }
       })
       .catch((billingError) => {
-        console.error("Could not check school billing navigation:", billingError);
+        console.error(
+          "Could not check school billing navigation:",
+          billingError,
+        );
         if (active) setTrialExpired(false);
       })
       .finally(() => {
@@ -377,8 +428,15 @@ export default function Sidebar() {
     "School Admin";
   const schoolDataComplete = hasCompleteSchoolData(school);
   const adminDataComplete = hasCompleteAdminData(admin);
-  const profileIncomplete = !schoolDataComplete || !adminDataComplete;
+  const isDriver =
+    (admin?.role || session.user?.admin_profile?.role) === "driver";
+  const profileIncomplete = isDriver
+    ? !adminDataComplete
+    : !schoolDataComplete || !adminDataComplete;
   const visibleMenuItems = menuItems.filter(({ path }) => {
+    if (isDriver && !["/trips", "/messages", "/notifications", "/settings"].includes(path)) {
+      return false;
+    }
     if (billingAccessLoading) return canAccessDuringExpiredTrial(path);
     if (trialExpired) return canAccessDuringExpiredTrial(path);
     return profileIncomplete
@@ -403,6 +461,8 @@ export default function Sidebar() {
               ? unreadMessages
               : path === "/notifications"
                 ? unreadNotifications
+                : path === "/attendance"
+                  ? pendingAttendance
                 : 0;
 
           return (
@@ -418,7 +478,11 @@ export default function Sidebar() {
               {badgeCount > 0 && (
                 <b
                   className="portal-nav-badge"
-                  aria-label={`${badgeCount} unread`}
+                  aria-label={
+                    path === "/attendance"
+                      ? `${badgeCount} students still need attendance marked`
+                      : `${badgeCount} unread`
+                  }
                 >
                   {badgeCount > 99 ? "99+" : badgeCount}
                 </b>
@@ -445,9 +509,9 @@ export default function Sidebar() {
             </NavLink>
           </>
         )}
-      <div className="sidebar-docs">
+      {/* <div className="sidebar-docs">
         <DocsButton className="sidebar-docs-button" />
-      </div>
+      </div> */}
       <div className="sidebar-user">
         {admin?.avatar ? (
           <img src={admin.avatar} alt="Admin profile" />

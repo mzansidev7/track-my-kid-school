@@ -13,6 +13,10 @@ export default function Login() {
   const [otpLoading, setOtpLoading] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
+  const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
 
   const update = (field) => (event) =>
     setForm((current) => ({ ...current, [field]: event.target.value }));
@@ -40,9 +44,17 @@ export default function Login() {
       }
       await setSupabaseSession(result.supabaseSession);
       localStorage.setItem("schoolAuth", JSON.stringify(result));
+      window.dispatchEvent(new Event("school-auth-changed"));
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
-      setError(requestError.message || "Unable to sign in.");
+      const errorCode = requestError.message;
+      setError(
+        errorCode === "INVALID_CREDENTIALS"
+          ? "Incorrect email or password. Please check your details and try again."
+          : errorCode === "LOGIN_FAILED"
+            ? "We couldn't sign you in right now. Please try again shortly."
+            : errorCode || "Unable to sign in.",
+      );
     } finally {
       setLoading(false);
     }
@@ -76,6 +88,7 @@ export default function Login() {
       };
       await setSupabaseSession(authenticated.supabaseSession);
       localStorage.setItem("schoolAuth", JSON.stringify(authenticated));
+      window.dispatchEvent(new Event("school-auth-changed"));
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
       setError(requestError.message || "Unable to verify OTP.");
@@ -104,6 +117,28 @@ export default function Login() {
     }
   };
 
+  const requestPasswordReset = async (event) => {
+    event.preventDefault();
+    setError("");
+    setForgotPasswordLoading(true);
+    try {
+      await apiRequest("/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ email: forgotEmail }),
+      });
+      setForgotPasswordSent(true);
+      setError("");
+    } catch (requestError) {
+      setError(
+        requestError.message === "PASSWORD_RESET_UNAVAILABLE"
+          ? "Password reset is temporarily unavailable. Please try again later."
+          : requestError.message || "Unable to request a password reset.",
+      );
+    } finally {
+      setForgotPasswordLoading(false);
+    }
+  };
+
   return (
     <main className="auth-shell">
       <section className="auth-intro">
@@ -119,11 +154,17 @@ export default function Login() {
       <section className="auth-panel">
         <div className="auth-panel-head">
           <p className="eyebrow">WELCOME BACK</p>
-          <h2>Sign in to your school</h2>
+          <h2>
+            {showForgotPassword
+              ? "Reset your password"
+              : "Sign in to your school"}
+          </h2>
           <p>
             {pendingAuth
               ? "Enter the OTP sent to your email to finish signing in."
-              : "Enter the email and password for your school account."}
+              : showForgotPassword
+                ? "If an account exists for this address, we’ll email a secure reset link."
+                : "Enter the email and password for your school account."}
           </p>
         </div>
         {pendingAuth ? (
@@ -164,6 +205,51 @@ export default function Login() {
               Resend OTP
             </button>
           </form>
+        ) : showForgotPassword ? (
+          <form onSubmit={requestPasswordReset} className="auth-form">
+            {forgotPasswordSent ? (
+              <div className="form-success" role="status">
+                If an account with that email exists, a password reset link has
+                been sent. Check your inbox.
+              </div>
+            ) : (
+              <>
+                <label>
+                  Email address
+                  <span className="input-wrap">
+                    <FiMail />
+                    <input
+                      type="email"
+                      autoComplete="email"
+                      value={forgotEmail}
+                      onChange={(event) => setForgotEmail(event.target.value)}
+                      required
+                      placeholder="school@example.com"
+                    />
+                  </span>
+                </label>
+                {error && <div className="form-error">{error}</div>}
+                <button
+                  className="primary-button"
+                  disabled={forgotPasswordLoading}
+                >
+                  {forgotPasswordLoading ? "Sending link..." : "Send reset link"}{" "}
+                  <FiArrowRight />
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              className="auth-secondary-button"
+              onClick={() => {
+                setShowForgotPassword(false);
+                setForgotPasswordSent(false);
+                setError("");
+              }}
+            >
+              Back to sign in
+            </button>
+          </form>
         ) : (
           <form onSubmit={submit} className="auth-form">
             <label>
@@ -196,11 +282,25 @@ export default function Login() {
             <button className="primary-button" disabled={loading}>
               {loading ? "Signing in..." : "Sign in"} <FiArrowRight />
             </button>
+            <button
+              type="button"
+              className="auth-secondary-button"
+              onClick={() => {
+                setForgotEmail(form.email);
+                setShowForgotPassword(true);
+                setForgotPasswordSent(false);
+                setError("");
+              }}
+            >
+              Forgot password?
+            </button>
           </form>
         )}
-        <p className="auth-switch">
-          Have an invitation? <Link to="/register">Create your account</Link>
-        </p>
+        {!showForgotPassword ? (
+          <p className="auth-switch">
+            Have an invitation? <Link to="/register">Create your account</Link>
+          </p>
+        ) : null}
       </section>
     </main>
   );

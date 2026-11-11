@@ -6,6 +6,7 @@ import {
   FiCheck,
   FiDownload,
   FiFileText,
+  FiPlus,
   FiRefreshCw,
   FiTruck,
   FiUsers,
@@ -13,6 +14,7 @@ import {
 import { useSchoolReports } from "../hooks/useSchoolReports";
 import { downloadSchoolReport } from "../utils/schoolReport";
 import "../styles/reports.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 import QuarterlyReports from "./QuarterlyReports";
 
 const tabs = [
@@ -347,20 +349,31 @@ function Reports() {
         </div>
       </header>
       <div className="portal-content reports-content">
-        <section className="reports-heading">
-          <div>
-            <p className="page-kicker">DATA & INSIGHTS</p>
-            <h1>Reports</h1>
-            <p>
-              Live summaries from school routes, attendance and fleet
-              assignments.
-            </p>
-          </div>
-          <div className="reports-actions">
+        <SchoolPageHeader
+          className="reports-heading"
+          actionsClassName="reports-actions"
+          eyebrow="DATA & INSIGHTS"
+          titleIcon={<span className="school-page-heading-icon"><FiBarChart2 /></span>}
+          title="Reports"
+          description="Live summaries from school routes, attendance and fleet assignments."
+          actions={
+            <>
             <span className="report-date">
               <FiCalendar /> This week: {dateLabel(data.attendance[0]?.date)} –{" "}
               {dateLabel(data.attendance.at(-1)?.date)}
             </span>
+            <button
+              className="report-primary"
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(
+                  new Event("school:create-learner-report"),
+                )
+              }
+              disabled={!data.students.length}
+            >
+              <FiPlus /> Create learner report
+            </button>
             <button
               className="report-secondary"
               type="button"
@@ -378,8 +391,9 @@ function Reports() {
             >
               <FiDownload /> {exporting ? "Preparing..." : "Download report"}
             </button>
-          </div>
-        </section>
+            </>
+          }
+        />
 
         {error && (
           <div className="reports-error" role="alert">

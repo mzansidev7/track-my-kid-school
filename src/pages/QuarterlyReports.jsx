@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FiDownload, FiEdit2, FiPlus, FiTrash2 } from "react-icons/fi";
+import {
+  FiDownload,
+  FiEdit2,
+  FiFileText,
+  FiPlus,
+  FiTrash2,
+} from "react-icons/fi";
 import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
 import { getCachedSchoolReportProfile } from "../utils/schoolReport";
 import { downloadQuarterlyLearnerReport } from "../utils/quarterlyLearnerReport";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 const getAuth = () => {
   try {
@@ -150,7 +157,7 @@ function QuarterlyReports() {
     };
   }, [load, schoolId]);
 
-  const openCreate = () => {
+  const openCreate = useCallback(() => {
     setEditingReport(null);
     setForm({
       ...emptyForm(),
@@ -158,7 +165,20 @@ function QuarterlyReports() {
     });
     setError("");
     setModalOpen(true);
-  };
+  }, [students]);
+
+  useEffect(() => {
+    const openFromPageHeader = () => openCreate();
+    window.addEventListener(
+      "school:create-learner-report",
+      openFromPageHeader,
+    );
+    return () =>
+      window.removeEventListener(
+        "school:create-learner-report",
+        openFromPageHeader,
+      );
+  }, [openCreate]);
 
   const openEdit = (report) => {
     setEditingReport(report);
@@ -251,21 +271,24 @@ function QuarterlyReports() {
 
   return (
     <section className="quarterly-reports-panel">
-      <div className="quarterly-reports-heading">
-        <div>
-          <p className="page-kicker">LEARNER PROGRESS</p>
-          <h2>Quarterly learner reports</h2>
-          <p>Create, save, and download term reports for families.</p>
-        </div>
-        <button
-          className="report-primary"
-          type="button"
-          onClick={openCreate}
-          disabled={!students.length}
-        >
-          <FiPlus /> Create learner report
-        </button>
-      </div>
+      <SchoolPageHeader
+        className="quarterly-reports-heading"
+        eyebrow="LEARNER PROGRESS"
+        titleIcon={<span className="school-page-heading-icon"><FiFileText /></span>}
+        titleAs="h2"
+        title="Quarterly learner reports"
+        description="Create, save, and download term reports for families."
+        actions={
+          <button
+            className="report-primary"
+            type="button"
+            onClick={openCreate}
+            disabled={!students.length}
+          >
+            <FiPlus /> Create learner report
+          </button>
+        }
+      />
       {error && <p className="reports-error" role="alert">{error}</p>}
       {!students.length && !loading ? (
         <p className="quarterly-reports-empty">

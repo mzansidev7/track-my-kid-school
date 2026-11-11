@@ -1,5 +1,6 @@
 import {
   FiArrowRight,
+  FiActivity,
   FiBell,
   FiClock,
   FiMapPin,
@@ -16,7 +17,9 @@ import "../styles/dashboard.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiRequest } from "../api";
+import { canAccessPath } from "../accessControl";
 import { clearSupabaseSession, supabaseClient } from "../supabaseClient";
+import DocsButton from "../components/DocsButton";
 
 const readCachedAnnouncements = (key) => {
   try {
@@ -133,6 +136,7 @@ export default function Dashboard() {
   const [schoolTrips, setSchoolTrips] = useState([]);
   const [schoolTripsLoading, setSchoolTripsLoading] = useState(true);
   const [attendanceDays, setAttendanceDays] = useState([]);
+  const [pendingAttendance, setPendingAttendance] = useState(0);
   const announcementsCacheKey = `schoolAnnouncementsCache:${auth.user?.id || "current"}`;
   const [announcements, setAnnouncements] = useState(() =>
     readCachedAnnouncements(announcementsCacheKey),
@@ -323,6 +327,31 @@ export default function Dashboard() {
     } catch (requestError) {
       console.error("Could not load dashboard attendance:", requestError);
     }
+    try {
+      const result = await apiRequest(
+        `/school/attendance?date=${toDate(today)}`,
+        { headers: { Authorization: `Bearer ${auth.token}` } },
+      );
+      const {
+        students = [],
+        records = [],
+        absenceReports = [],
+      } = result || {};
+      const handledStudentIds = new Set([
+        ...records.map((record) => String(record.child_id)),
+        ...absenceReports.map((report) => String(report.child_id)),
+      ]);
+      setPendingAttendance(
+        students.filter(
+          (student) => !handledStudentIds.has(String(student.id)),
+        ).length,
+      );
+    } catch (requestError) {
+      console.error(
+        "Could not load pending dashboard attendance:",
+        requestError,
+      );
+    }
   }, [auth.token]);
 
   useEffect(() => {
@@ -426,6 +455,7 @@ export default function Dashboard() {
     localStorage.removeItem("schoolAuth");
     localStorage.removeItem(cacheKey);
     sessionStorage.removeItem("schoolAuth");
+    window.dispatchEvent(new Event("school-auth-changed"));
     setProfileOpen(false);
     try {
       await clearSupabaseSession();
@@ -588,6 +618,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="school-actions">
+            <DocsButton />
             <button>View Public Page ↗</button>
             <button className="action-primary">
               Actions <span>⌄</span>
@@ -756,6 +787,24 @@ export default function Dashboard() {
               title="Attendance Overview"
               action={attendancePeriod}
             />
+            {pendingAttendance > 0 &&
+              canAccessPath(admin?.access_level, "/attendance") && (
+                <Link
+                  className="attendance-dashboard-reminder"
+                  to="/attendance"
+                >
+                  <FiActivity aria-hidden="true" />
+                  <span>
+                    <strong>Attendance still needs to be marked</strong>
+                    <small>
+                      {pendingAttendance} student
+                      {pendingAttendance === 1 ? "" : "s"} need
+                      {pendingAttendance === 1 ? "s" : ""} a status today.
+                    </small>
+                  </span>
+                  <FiArrowRight aria-hidden="true" />
+                </Link>
+              )}
             {students.length === 0 ? (
               <p className="school-trip-dashboard-empty">
                 No students are enrolled, so attendance is not available yet.

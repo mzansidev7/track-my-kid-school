@@ -19,16 +19,19 @@ import SupportTickets from "./pages/SupportTickets";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import PasswordReset from "./pages/PasswordReset";
 import Members from "./pages/Members";
 import Billing from "./pages/Billing";
 import Messages from "./pages/Messages";
 import PortalLayout from "./components/PortalLayout";
 import { apiRequest } from "./api";
+import { PresenceProvider } from "./presence/PresenceProvider";
 import {
   canAccessDuringExpiredTrial,
   canAccessPath,
   isSchoolTrialExpiredWithoutPaidSubscription,
 } from "./accessControl";
+import "./styles/portal-theme.css";
 
 const requiredSchoolFields = [
   "name",
@@ -250,9 +253,23 @@ function ProtectedRoute({ children }) {
     school?.admin_profile?.access_level ||
     auth?.user?.admin_profile?.access_level ||
     auth?.admin_profile?.access_level;
+  const adminRole =
+    school?.admin_profile?.role ||
+    auth?.user?.admin_profile?.role ||
+    auth?.admin_profile?.role;
+  const driverAllowedPaths = new Set([
+    "/trips",
+    "/messages",
+    "/notifications",
+    "/settings",
+  ]);
+  if (adminRole === "driver" && !driverAllowedPaths.has(location.pathname)) {
+    return <Navigate to="/trips" replace />;
+  }
   const expiredTrialBillingAccess =
     trialExpired && canAccessDuringExpiredTrial(location.pathname);
   if (
+    adminRole !== "driver" &&
     trialExpired &&
     !expiredTrialBillingAccess
   ) {
@@ -267,6 +284,7 @@ function ProtectedRoute({ children }) {
 
   if (
     !profileLoading &&
+    adminRole !== "driver" &&
     location.pathname !== "/settings" &&
     !expiredTrialBillingAccess &&
     (!hasCompleteSchoolData(school) || !hasCompleteAdminData(school, auth))
@@ -278,11 +296,66 @@ function ProtectedRoute({ children }) {
 }
 
 export default function App() {
+  const [tabId] = useState(() => {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  });
+  const [isActiveTab, setIsActiveTab] = useState(true);
+
+  useEffect(() => {
+    const tabStorageKey = "schoolPortalActiveTab";
+    const handleOtherTab = (event) => {
+      if (
+        event.key === tabStorageKey &&
+        event.newValue &&
+        event.newValue !== tabId
+      ) {
+        setIsActiveTab(false);
+      }
+    };
+
+    window.addEventListener("storage", handleOtherTab);
+    localStorage.setItem(tabStorageKey, tabId);
+
+    return () => window.removeEventListener("storage", handleOtherTab);
+  }, [tabId]);
+
+  if (!isActiveTab) {
+    return (
+      <main
+        role="alert"
+        style={{
+          alignItems: "center",
+          background: "#f8fafc",
+          color: "#1e293b",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          minHeight: "100vh",
+          padding: "24px",
+          textAlign: "center",
+        }}
+      >
+        <h1 style={{ fontSize: "1.5rem", marginBottom: "8px" }}>
+          School portal opened in another tab
+        </h1>
+        <p style={{ maxWidth: "480px" }}>
+          This tab is inactive. Continue using the school portal in the tab you
+          opened most recently, then close this tab.
+        </p>
+      </main>
+    );
+  }
+
   return (
+    <PresenceProvider>
     <Routes>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/reset-password" element={<PasswordReset />} />
 
       <Route
         path="/dashboard"
@@ -429,5 +502,6 @@ export default function App() {
         }
       />
     </Routes>
+    </PresenceProvider>
   );
 }

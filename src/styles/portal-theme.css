@@ -1,0 +1,263 @@
+.portal-shell {
+  background: var(--portal-page-bg);
+}
+
+.portal-main {
+  background: var(--portal-page-bg);
+}
+
+.portal-main > .portal-topbar:not(.portal-shared-header) {
+  border-bottom-color: var(--portal-border);
+  background: #fff;
+}
+
+.portal-main > .portal-content,
+.portal-main > .messages-page,
+.portal-main > .billing-page,
+.portal-main > .school-support-page,
+.portal-main > .notifications-content,
+.portal-main > .drivers-content,
+.portal-main > .vehicles-content,
+.portal-main > .routes-content,
+.portal-main > .trips-content,
+.portal-main > .attendance-content,
+.portal-main > .parents-content,
+.portal-main > .announcements-content,
+.portal-main > .reports-content,
+.portal-main > .tracking-content,
+.portal-main > .incidents-content,
+.portal-main > .settings-content,
+.portal-main > .members-content,
+.portal-main > .students-content {
+  background-color: var(--portal-page-bg);
+}
+
+.portal-main .school-page-heading .school-page-heading-copy::before {
+  background: var(--portal-accent);
+}
+
+.portal-main .school-page-heading .school-page-heading-icon {
+  border-color: #e0d8f6;
+  background: linear-gradient(145deg, #f7f3ff, #ece6fb);
+  color: var(--portal-accent);
+  box-shadow: 0 4px 12px rgb(73 52 137 / 9%);
+}
+
+.portal-main .school-page-heading .page-kicker {
+  color: var(--portal-accent);
+}
+
+.portal-main .school-page-heading h1,
+.portal-main .school-page-heading h2 {
+  color: var(--portal-ink);
+}
+
+.portal-main .portal-docs-button:hover,
+.portal-main .portal-docs-close:hover {
+  border-color: var(--portal-accent);
+  color: var(--portal-accent);
+}
+
+.portal-main .portal-docs-eyebrow,
+.portal-main .portal-docs-section-number {
+  color: var(--portal-accent);
+}
+
+.portal-main .portal-docs-section-number {
+  background: var(--portal-accent-soft);
+}
+
+.portal-main :is(
+  .student-primary,
+  .student-submit,
+  .driver-add-submit,
+  .vehicle-primary,
+  .route-primary,
+  .trip-primary,
+  .attendance-primary,
+  .parent-primary,
+  .announcement-primary,
+  .announcement-send,
+  .report-primary,
+  .notification-primary,
+  .incident-primary,
+  .member-primary,
+  .member-submit,
+  .settings-save,
+  .billing-submit,
+  .school-support-primary,
+  .messages-new-button,
+  .school-group-create
+) {
+  border-color: var(--portal-accent);
+  background: var(--portal-accent);
+  color: #fff;
+}
+
+.portal-main button:is(
+  [class*="primary"],
+  [class*="submit"],
+  [class*="save"],
+  [class*="send"],
+  [class*="create"]
+):not(
+  [class*="danger"],
+  [class*="delete"],
+  [class*="remove"],
+  [class*="cancel"],
+  [class*="status"],
+  [class*="toggle"]
+) {
+  border-color: var(--portal-accent);
+  background: var(--portal-accent);
+  color: #fff;
+}
+
+.portal-main button:is(
+  [class*="primary"],
+  [class*="submit"],
+  [class*="save"],
+  [class*="send"],
+  [class*="create"]
+):not(
+  [class*="danger"],
+  [class*="delete"],
+  [class*="remove"],
+  [class*="cancel"],
+  [class*="status"],
+  [class*="toggle"]
+):hover:not(:disabled) {
+  border-color: var(--portal-accent-dark);
+  background: var(--portal-accent-dark);
+  color: #fff;
+}
+
+.portal-main button:is(
+  [class*="secondary"],
+  [class*="export"],
+  [class*="filter"],
+  [class*="clear"],
+  [class*="retry"],
+  [class*="view"]
+):not(
+  [class*="danger"],
+  [class*="delete"],
+  [class*="remove"],
+  [class*="status"],
+  [class*="toggle"]
+) {
+  border-color: #ded6f3;
+  background: #f7f4ff;
+  color: var(--portal-accent-dark);
+}
+
+.portal-main button:is(
+  [class*="secondary"],
+  [class*="export"],
+  [class*="filter"],
+  [class*="clear"],
+  [class*="retry"],
+  [class*="view"]
+):not(
+  [class*="danger"],
+  [class*="delete"],
+  [class*="remove"],
+  [class*="status"],
+  [class*="toggle"]
+):hover:not(:disabled) {
+  border-color: #c8b9ee;
+  background: #eee8ff;
+  color: #3f1fa5;
+}
+
+.portal-main :is(
+  .student-primary,
+  .student-submit,
+  .driver-add-submit,
+  .vehicle-primary,
+  .route-primary,
+  .trip-primary,
+  .attendance-primary,
+  .parent-primary,
+  .announcement-primary,
+  .announcement-send,
+  .report-primary,
+  .notification-primary,
+  .incident-primary,
+  .member-primary,
+  .member-submit,
+  .settings-save,
+  .billing-submit,
+  .school-support-primary,
+  .messages-new-button,
+  .school-group-create
+):hover:not(:disabled) {
+  border-color: var(--portal-accent-dark);
+  background: var(--portal-accent-dark);
+  color: #fff;
+}
+
+.portal-main :is(
+  .student-primary,
+  .student-submit,
+  .driver-add-submit,
+  .vehicle-primary,
+  .route-primary,
+  .trip-primary,
+  .attendance-primary,
+  .parent-primary,
+  .announcement-primary,
+  .announcement-send,
+  .report-primary,
+  .notification-primary,
+  .incident-primary,
+  .member-primary,
+  .member-submit,
+  .settings-save,
+  .billing-submit,
+  .school-support-primary,
+  .messages-new-button,
+  .school-group-create
+):focus-visible {
+  outline: 3px solid rgb(105 64 220 / 25%);
+  outline-offset: 2px;
+}
+
+.portal-main button[aria-current="page"] {
+  border-color: var(--portal-nav-active);
+  background: linear-gradient(
+    90deg,
+    var(--portal-nav-active),
+    var(--portal-nav-active-dark)
+  );
+  color: #fff;
+}
+
+.portal-main button:focus-visible {
+  outline: 3px solid rgb(105 64 220 / 25%);
+  outline-offset: 2px;
+}
+
+.portal-main :is(
+  .student-form input,
+  .student-form select,
+  .driver-add-fields input,
+  .vehicle-form input,
+  .vehicle-form select,
+  .route-form input,
+  .route-form select,
+  .attendance-search input,
+  .members-search input,
+  .school-support-form input,
+  .school-support-form textarea
+):focus {
+  border-color: var(--portal-accent);
+  outline-color: rgb(105 64 220 / 20%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-main .school-page-heading-actions button,
+  .portal-main .portal-docs-close {
+    transition: none;
+  }
+}

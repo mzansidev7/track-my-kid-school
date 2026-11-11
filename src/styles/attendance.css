@@ -8,15 +8,14 @@
 }
 .attendance-content {
   display: flex;
-  width: 100%;
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  box-sizing: border-box;
   overflow: hidden;
-  padding: 14px 22px;
-  background: #fff;
-  color: #334155;
+  padding: 26px 20px 30px;
+  box-sizing: border-box;
+  background: #f7faff;
+  color: #172b4d;
 }
 .attendance-heading {
   display: flex;
@@ -48,6 +47,27 @@
   font-size: 11px;
   font-weight: 750;
   cursor: pointer;
+}
+.attendance-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.attendance-button-spinner {
+  animation: attendance-spin 900ms linear infinite;
+}
+@keyframes attendance-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.attendance-overview-error {
+  margin: -7px 0 14px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  padding: 9px 12px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 11px;
 }
 .attendance-notice {
   display: flex;
@@ -90,6 +110,7 @@
   margin: 2px 0 0;
   color: #a16207;
   font-size: 10px;
+  line-height: 1.5;
 }
 .attendance-reminder button {
   flex: 0 0 auto;
@@ -484,6 +505,68 @@
   background: #fff;
   color: #6030d2;
   box-shadow: 0 1px 3px #17204d1a;
+}
+.attendance-side-reminder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 2px;
+  border: 1px solid #f5d58f;
+  border-radius: 9px;
+  padding: 9px;
+  background: linear-gradient(135deg, #fffbeb, #fff7df);
+  color: #92400e;
+}
+.attendance-side-reminder-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: 9px;
+  background: #fef0c7;
+  color: #d97706;
+  font-size: 15px;
+}
+.attendance-side-reminder-copy {
+  min-width: 0;
+  flex: 1;
+}
+.attendance-side-reminder-copy strong {
+  display: block;
+  font-size: 10px;
+  font-weight: 750;
+}
+.attendance-side-reminder-copy p {
+  margin: 3px 0 0;
+  color: #a16207;
+  font-size: 9px;
+  line-height: 1.4;
+}
+.attendance-side-reminder > button {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  place-items: center;
+  border: 1px solid #edc76e;
+  border-radius: 7px;
+  background: #fff;
+  color: #a16207;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease;
+}
+.attendance-side-reminder > button:hover {
+  transform: translateY(1px);
+  background: #fef3c7;
+  color: #854d0e;
+}
+.attendance-side-reminder > button:focus-visible {
+  outline: 3px solid rgb(217 119 6 / 25%);
+  outline-offset: 2px;
 }
 .weekly-chart {
   display: flex;

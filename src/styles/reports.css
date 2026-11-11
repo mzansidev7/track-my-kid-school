@@ -1,7 +1,13 @@
 .reports-content {
-  min-height: calc(100svh - 48px);
-  background: #fff;
-  color: #334155;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 26px 20px 30px;
+  box-sizing: border-box;
+  background: #f7faff;
+  color: #172b4d;
 }
 .reports-heading {
   display: flex;
@@ -33,12 +39,15 @@
   cursor: pointer;
 }
 .report-date {
+  box-sizing: border-box;
   display: inline-flex;
+  height: 35px;
+  min-height: 35px;
   align-items: center;
   gap: 7px;
   border: 1px solid #dce4eb;
   border-radius: 6px;
-  padding: 8px 13px;
+  padding: 0 13px;
   background: #fff;
   color: #334155;
   font-size: 10px;

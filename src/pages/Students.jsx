@@ -9,6 +9,7 @@ import {
   FiMoreHorizontal,
   FiPlus,
   FiSearch,
+  FiShield,
   FiSliders,
   FiTrash2,
   FiUser,
@@ -24,6 +25,7 @@ import {
   showDeleteConfirmationAlert,
 } from "../components/sweetAlert.js";
 import "../styles/students.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 function getAuth() {
   try {
@@ -57,6 +59,12 @@ function Students() {
   const [editingStudent, setEditingStudent] = useState(null);
   const [openOptions, setOpenOptions] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [pickupTarget, setPickupTarget] = useState(null);
+  const [pickupContacts, setPickupContacts] = useState([]);
+  const [pickupContactId, setPickupContactId] = useState("");
+  const [pickupPin, setPickupPin] = useState("");
+  const [pickupContactsLoading, setPickupContactsLoading] = useState(false);
+  const [pickupVerifying, setPickupVerifying] = useState(false);
   const [form, setForm] = useState({ name: "", lastname: "", grade: "" });
   const auth = getAuth();
   const [authToken] = useState(() => auth.token || "");
@@ -179,6 +187,61 @@ function Students() {
     setForm({ name: "", lastname: "", grade: "" });
   };
 
+  const openPickupVerification = async (student) => {
+    setOpenOptions(null);
+    setPickupTarget(student);
+    setPickupContacts([]);
+    setPickupContactId("");
+    setPickupPin("");
+    setPickupContactsLoading(true);
+    try {
+      const contacts = await apiRequest(
+        `/school/children/${student.id}/pickup-contacts`,
+        { headers: { Authorization: `****** || ""}` } },
+      );
+      setPickupContacts(Array.isArray(contacts) ? contacts : []);
+    } catch (error) {
+      showErrorAlert(error.message || "Unable to load authorized contacts.");
+      setPickupTarget(null);
+    } finally {
+      setPickupContactsLoading(false);
+    }
+  };
+
+  const verifyPickup = async (event) => {
+    event.preventDefault();
+    if (!pickupTarget || !pickupContactId || !/^\d{6}$/.test(pickupPin)) {
+      showErrorAlert("Select an authorized contact and enter the six-digit PIN.");
+      return;
+    }
+    setPickupVerifying(true);
+    try {
+      const result = await apiRequest("/school/pickup-verifications", {
+        method: "POST",
+        headers: { Authorization: `****** || ""}` },
+        body: JSON.stringify({
+          child_id: pickupTarget.id,
+          contact_id: pickupContactId,
+          pin: pickupPin,
+        }),
+      });
+      successMessage({
+        title: `${result.recipient_name} was verified for pickup.`,
+        text:
+          result.notification_sent === false
+            ? "Pickup was verified, but the parent could not be notified. Please contact them directly."
+            : "The pickup was verified and the parent was notified.",
+      });
+      setPickupTarget(null);
+      setPickupContacts([]);
+      setPickupPin("");
+    } catch (error) {
+      showErrorAlert(error.message || "Pickup could not be verified.");
+    } finally {
+      setPickupVerifying(false);
+    }
+  };
+
   const deleteStudent = async (student) => {
     const confirmation = await showDeleteConfirmationAlert({
       title: `Delete ${student.displayName}?`,
@@ -254,26 +317,34 @@ function Students() {
 
   const students = useMemo(
     () =>
-      (dashboard?.students || []).map((student) => {
-        const parent = (dashboard?.parents || []).find(
-          (item) => item.id === student.client_id,
-        );
-        return {
-          ...student,
-          displayName: [student.name, student.lastname]
-            .filter(Boolean)
-            .join(" "),
-          displayId: `STU-${String(student.id).slice(-4).toUpperCase()}`,
-          parentName:
-            [parent?.first_name, parent?.last_name].filter(Boolean).join(" ") ||
-            parent?.users?.name ||
-            "No guardian linked",
-          parentPhone:
-            parent?.phone || parent?.users?.phone || "No phone number",
-          displayStatus: student.is_active === false ? "Inactive" : "Active",
-          transport: student.route_name || "Not assigned",
-        };
-      }),
+      (dashboard?.students || [])
+        .filter(
+          (student) =>
+            dashboard?.school?.id &&
+            String(student.school_id) === String(dashboard.school.id),
+        )
+        .map((student) => {
+          const parent = (dashboard?.parents || []).find(
+            (item) => item.id === student.client_id,
+          );
+          return {
+            ...student,
+            displayName: [student.name, student.lastname]
+              .filter(Boolean)
+              .join(" "),
+            displayId: `STU-${String(student.id).slice(-4).toUpperCase()}`,
+            parentName:
+              [parent?.first_name, parent?.last_name]
+                .filter(Boolean)
+                .join(" ") ||
+              parent?.users?.name ||
+              "No guardian linked",
+            parentPhone:
+              parent?.phone || parent?.users?.phone || "No phone number",
+            displayStatus: student.is_active === false ? "Inactive" : "Active",
+            transport: student.route_name || "Not assigned",
+          };
+        }),
     [dashboard],
   );
 
@@ -495,21 +566,23 @@ function Students() {
       </header>
 
       <div className="portal-content students-content">
-        <section className="students-heading">
-          <div>
-            <p className="page-kicker">SCHOOL DIRECTORY</p>
-            <h1>Students</h1>
-            <p>
-              Manage student profiles, guardians, and transport assignments.
-            </p>
+        <SchoolPageHeader
+          className="students-heading"
+          actionsClassName="students-actions"
+          eyebrow="SCHOOL DIRECTORY"
+          titleIcon={<span className="school-page-heading-icon"><FiUsers /></span>}
+          title="Students"
+          description="Manage student profiles, guardians, and transport assignments."
+          meta={
             <small className="student-plan-limit">
               {students.length} learner{students.length === 1 ? "" : "s"}
               {learnerLimit !== null
                 ? ` · ${learnerLimit?.toLocaleString() || "250"} learner limit on ${plan?.name || planSlug} plan`
                 : " · Unlimited learners on Enterprise"}
             </small>
-          </div>
-          <div className="students-actions">
+          }
+          actions={
+            <>
             <button className="secondary-button" onClick={exportExcel}>
               <FiDownload /> Excel
             </button>
@@ -526,8 +599,9 @@ function Students() {
             >
               <FiPlus /> Add student
             </button>
-          </div>
-        </section>
+            </>
+          }
+        />
         <section className="student-metrics">
           <article>
             <span className="metric-circle green-circle">
@@ -732,6 +806,11 @@ function Students() {
                       </button>
                       {openOptions === student.id && (
                         <div className="student-options" role="menu">
+                          <button
+                            onClick={() => void openPickupVerification(student)}
+                          >
+                            <FiShield /> Verify pickup
+                          </button>
                           <button onClick={() => editStudent(student)}>
                             <FiEdit2 /> Edit
                           </button>
@@ -789,6 +868,76 @@ function Students() {
             </div>
           </div>
         </section>
+        {pickupTarget && (
+          <div
+            className="student-modal"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setPickupTarget(null);
+            }}
+          >
+            <form className="student-form" onSubmit={verifyPickup}>
+              <div className="student-form-head">
+                <h2>Verify authorized pickup</h2>
+                <button
+                  type="button"
+                  onClick={() => setPickupTarget(null)}
+                  aria-label="Close"
+                >
+                  <FiX />
+                </button>
+              </div>
+              <p>
+                Verify the adult collecting {pickupTarget.displayName || pickupTarget.name}.
+                The one-use PIN expires after 30 minutes and cannot be reused.
+              </p>
+              {pickupContactsLoading ? (
+                <p>Loading active authorizations…</p>
+              ) : pickupContacts.length === 0 ? (
+                <p>No active authorized pickup contacts were found for this student.</p>
+              ) : (
+                <>
+                  <select
+                    className="pickup-contact-select"
+                    required
+                    value={pickupContactId}
+                    onChange={(event) => setPickupContactId(event.target.value)}
+                  >
+                    <option value="">Select authorized contact</option>
+                    {pickupContacts.map((contact) => (
+                      <option key={contact.id} value={contact.id}>
+                        {contact.name} · {contact.relationship}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    pattern="[0-9]{6}"
+                    placeholder="Six-digit pickup PIN"
+                    value={pickupPin}
+                    onChange={(event) =>
+                      setPickupPin(
+                        event.target.value.replace(/\D/g, "").slice(0, 6),
+                      )
+                    }
+                  />
+                </>
+              )}
+              <button
+                className="student-submit"
+                disabled={
+                  pickupVerifying ||
+                  pickupContactsLoading ||
+                  pickupContacts.length === 0
+                }
+              >
+                {pickupVerifying ? "Verifying…" : "Verify pickup"}
+              </button>
+            </form>
+          </div>
+        )}
         {formOpen && (
           <div
             className="student-modal"

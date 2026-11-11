@@ -1,10 +1,18 @@
 .school-support-page {
+  --support-primary: #1d4ed8;
+  --support-muted: #718096;
+  --support-line: #e5eaf2;
   --support-ink: #172b4d;
-  --support-muted: #77849a;
-  --support-line: #e8edf4;
-  --support-primary: #245fe8;
-  color: var(--support-ink);
-  padding: 28px 32px 36px;
+
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 26px 20px 30px;
+  box-sizing: border-box;
+  background: #f7faff;
+  color: #172b4d;
 }
 
 .school-support-header,

@@ -17,6 +17,7 @@ import { canManageUsers } from "../accessControl";
 import Members from "./Members";
 import { supabaseClient } from "../supabaseClient";
 import "../styles/settings.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 const educationDistrictsAndProvinces = {
   "Eastern Cape": [
@@ -231,9 +232,79 @@ const requiredSchoolFields = [
   "end_time",
 ];
 
+const cacheAdminProfile = (auth, adminProfile) => {
+  const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
+  const profileFields = [
+    "id",
+    "user_id",
+    "first_name",
+    "last_name",
+    "email",
+    "phone",
+    "job_title",
+    "role",
+    "access_level",
+    "avatar",
+  ];
+  const safeProfile = Object.fromEntries(
+    profileFields
+      .filter((field) => Object.prototype.hasOwnProperty.call(adminProfile, field))
+      .map((field) => [field, adminProfile[field]]),
+  );
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+    localStorage.setItem(
+      cacheKey,
+      JSON.stringify({
+        data: {
+          ...(cached?.data || {}),
+          admin_profile: {
+            ...(cached?.data?.admin_profile || {}),
+            ...safeProfile,
+          },
+        },
+        timestamp: Date.now(),
+      }),
+    );
+  } catch (cacheError) {
+    console.error("Could not cache school administrator profile:", cacheError);
+  }
+};
+
 function Settings() {
   const navigate = useNavigate();
-  const [active, setActive] = useState("School Profile");
+  const session = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("schoolAuth") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const cachedSettings = (() => {
+    try {
+      const key = `schoolProfileCache:${session.user?.id || "current"}`;
+      return JSON.parse(localStorage.getItem(key) || "null")?.data || {};
+    } catch {
+      return {};
+    }
+  })();
+  const isDriver =
+    session.user?.admin_profile?.role === "driver" ||
+    session.admin_profile?.role === "driver" ||
+    (() => {
+      try {
+        const key = `schoolProfileCache:${session.user?.id || "current"}`;
+        return (
+          JSON.parse(localStorage.getItem(key) || "null")?.data
+            ?.admin_profile?.role === "driver"
+        );
+      } catch {
+        return false;
+      }
+    })();
+  const [active, setActive] = useState(
+    isDriver ? "User Profile" : "School Profile",
+  );
   const [membersFormOpen, setMembersFormOpen] = useState(false);
   const [passwordFieldsVisible, setPasswordFieldsVisible] = useState(false);
   const [profile, setProfile] = useState(() => {
@@ -262,11 +333,21 @@ function Settings() {
       (!districts || !districts.includes(currentProfile.district)),
     );
   });
-  const [userProfile, setUserProfile] = useState(emptyUserProfile);
+  const cachedAdminProfile =
+    cachedSettings.admin_profile || session.user?.admin_profile || {};
+  const [userProfile, setUserProfile] = useState(() => ({
+    ...emptyUserProfile,
+    name: session.user?.name || "",
+    email: session.user?.email || "",
+    phone: session.user?.phone || "",
+    ...cachedAdminProfile,
+  }));
   const [saved, setSaved] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isDriver);
   const [saving, setSaving] = useState(false);
-  const [userProfileLoading, setUserProfileLoading] = useState(true);
+  const [userProfileLoading, setUserProfileLoading] = useState(
+    () => !cachedAdminProfile.id,
+  );
   const [error, setError] = useState("");
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState("");
@@ -300,11 +381,13 @@ function Settings() {
     educationDistrictsAndProvinces,
     profile.province,
   );
-  const settingsProfileIncomplete =
-    schoolProfileIncomplete || userProfileIncomplete;
+  const settingsProfileIncomplete = isDriver
+    ? userProfileIncomplete
+    : schoolProfileIncomplete || userProfileIncomplete;
   const accessLevel = userProfile.access_level;
   const visibleItems = items.filter((item) => {
     const title = item[1];
+    if (isDriver) return title === "User Profile";
     if (title === "Users & Roles") return canManageUsers(accessLevel);
     return true;
   });
@@ -364,32 +447,34 @@ function Settings() {
       // Fetch the profile when local storage does not contain valid data.
     }
 
-    apiRequest("/school/profile", {
-      headers: { Authorization: `Bearer ${auth.token || ""}` },
-    })
-      .then((school) => {
-        if (!activeRequest) return;
-        setProfile({ ...emptyProfile, ...school });
-        const districts = educationDistrictsAndProvinces[school.province];
-        setDistrictOtherSelected(
-          Boolean(
-            school.district &&
-            (!districts || !districts.includes(school.district)),
-          ),
-        );
-        const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
-        localStorage.setItem(
-          cacheKey,
-          JSON.stringify({ data: school, timestamp: Date.now() }),
-        );
+    if (!isDriver) {
+      apiRequest("/school/profile", {
+        headers: { Authorization: `Bearer ${auth.token || ""}` },
       })
-      .catch((requestError) => {
-        if (activeRequest)
-          setError(requestError.message || "Unable to load school profile.");
-      })
-      .finally(() => {
-        if (activeRequest) setLoading(false);
-      });
+        .then((school) => {
+          if (!activeRequest) return;
+          setProfile({ ...emptyProfile, ...school });
+          const districts = educationDistrictsAndProvinces[school.province];
+          setDistrictOtherSelected(
+            Boolean(
+              school.district &&
+              (!districts || !districts.includes(school.district)),
+            ),
+          );
+          const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
+          localStorage.setItem(
+            cacheKey,
+            JSON.stringify({ data: school, timestamp: Date.now() }),
+          );
+        })
+        .catch((requestError) => {
+          if (activeRequest)
+            setError(requestError.message || "Unable to load school profile.");
+        })
+        .finally(() => {
+          if (activeRequest) setLoading(false);
+        });
+    }
 
     apiRequest("/school/admin/profile", {
       headers: { Authorization: `Bearer ${auth.token || ""}` },
@@ -397,24 +482,7 @@ function Settings() {
       .then((adminProfile) => {
         if (activeRequest) {
           setUserProfile({ ...emptyUserProfile, ...adminProfile });
-          const cacheKey = `schoolProfileCache:${auth.user?.id || "current"}`;
-          try {
-            const cached = JSON.parse(
-              localStorage.getItem(cacheKey) || "null",
-            );
-            localStorage.setItem(
-              cacheKey,
-              JSON.stringify({
-                data: {
-                  ...(cached?.data || {}),
-                  admin_profile: adminProfile,
-                },
-                timestamp: Date.now(),
-              }),
-            );
-          } catch {
-            // Profile loading remains successful if the browser cache is unavailable.
-          }
+          cacheAdminProfile(auth, adminProfile);
           window.dispatchEvent(
             new CustomEvent("school-profile-updated", {
               detail: { admin_profile: adminProfile },
@@ -434,7 +502,7 @@ function Settings() {
     return () => {
       activeRequest = false;
     };
-  }, []);
+  }, [isDriver]);
 
   useEffect(() => {
     if (!supabaseClient || !profile.id) return undefined;
@@ -472,14 +540,18 @@ function Settings() {
         },
         ({ new: nextAdmin }) => {
           if (nextAdmin?.user_id !== auth.user?.id) return;
-          setUserProfile((current) => ({
-            ...current,
-            first_name: nextAdmin.first_name || "",
-            last_name: nextAdmin.last_name || "",
-            phone: nextAdmin.phone || "",
-            job_title: nextAdmin.job_title || "",
-            role: nextAdmin.role || "",
-          }));
+          setUserProfile((current) => {
+            const updatedAdminProfile = {
+              ...current,
+              first_name: nextAdmin.first_name || "",
+              last_name: nextAdmin.last_name || "",
+              phone: nextAdmin.phone || "",
+              job_title: nextAdmin.job_title || "",
+              role: nextAdmin.role || "",
+            };
+            cacheAdminProfile(auth, updatedAdminProfile);
+            return updatedAdminProfile;
+          });
         },
       )
       .on(
@@ -492,11 +564,15 @@ function Settings() {
         },
         ({ new: nextUser }) => {
           if (nextUser?.id !== auth.user?.id) return;
-          setUserProfile((current) => ({
-            ...current,
-            email: nextUser.email || current.email,
-            phone: nextUser.phone || current.phone,
-          }));
+          setUserProfile((current) => {
+            const updatedUserProfile = {
+              ...current,
+              email: nextUser.email || current.email,
+              phone: nextUser.phone || current.phone,
+            };
+            cacheAdminProfile(auth, updatedUserProfile);
+            return updatedUserProfile;
+          });
         },
       )
       .subscribe();
@@ -796,19 +872,22 @@ function Settings() {
         </div>
       </header>
       <div className="portal-content settings-content">
-        <section className="settings-heading">
-          <div>
-            <p className="page-kicker">ADMINISTRATION</p>
-            <h1>Settings</h1>
-            <p>Manage your school settings and preferences.</p>
-            {settingsProfileIncomplete && (
+        <SchoolPageHeader
+          className="settings-heading"
+          eyebrow="ADMINISTRATION"
+          titleIcon={<span className="school-page-heading-icon"><SettingsIcon /></span>}
+          title="Settings"
+          description="Manage your school settings and preferences."
+          meta={
+            settingsProfileIncomplete ? (
               <div className="settings-incomplete-banner" role="alert">
                 Complete all required School Profile and User Profile fields to
                 unlock the remaining settings.
               </div>
-            )}
-          </div>
-          {active === "Users & Roles" && canManageUsers(accessLevel) ? (
+            ) : null
+          }
+          actions={
+            active === "Users & Roles" && canManageUsers(accessLevel) ? (
             <button
               className="member-primary"
               onClick={() => setMembersFormOpen(true)}
@@ -848,8 +927,9 @@ function Settings() {
                     ? "Update password"
                     : "Save changes"}
             </button>
-          )}
-        </section>
+            )
+          }
+        />
         <section className="settings-layout">
           <aside className="settings-menu">
             <h2>Settings</h2>

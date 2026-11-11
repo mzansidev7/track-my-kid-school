@@ -1,18 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertCircle,
   FiChevronDown,
   FiClock,
   FiCrosshair,
-  FiLayers,
   FiMapPin,
   FiPhone,
   FiUsers,
 } from "react-icons/fi";
 import { FaBus } from "react-icons/fa";
+import {
+  APIProvider,
+  AdvancedMarker,
+  AdvancedMarkerAnchorPoint,
+  Map as GoogleMap,
+  useMap,
+} from "@vis.gl/react-google-maps";
 import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
 import "../styles/liveTracking.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
+
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 function getAuth() {
   try {
@@ -20,6 +29,180 @@ function getAuth() {
   } catch {
     return {};
   }
+}
+
+const getRelatedRecord = (record) =>
+  Array.isArray(record) ? record[0] || null : record || null;
+
+const getVehicleImage = (vehicle) => {
+  const image = Array.isArray(vehicle?.vehicle_images)
+    ? vehicle.vehicle_images[0]
+    : null;
+  return typeof image === "string" ? image : image?.url || image?.publicUrl || "";
+};
+
+const getSchoolRouteStops = (stops = []) => {
+  const pickupStops = [];
+  const schoolStops = new Map();
+
+  for (const stop of stops) {
+    const child = getRelatedRecord(stop.children);
+    if (stop.stop_type === "pickup") {
+      pickupStops.push({
+        ...stop,
+        marker_type: "pickup",
+        marker_label:
+          [child?.name, child?.lastname].filter(Boolean).join(" ") ||
+          stop.address ||
+          "Student pickup",
+      });
+      continue;
+    }
+
+    if (stop.stop_type !== "dropoff") continue;
+    const school = getRelatedRecord(child?.schools || child?.school);
+    const schoolName = school?.name || "School";
+    const position =
+      parseCoordinate(
+        school?.latitude,
+        school?.longitude,
+        school?.address || schoolName,
+      ) || parseCoordinate(stop.latitude, stop.longitude, stop.address);
+    if (!position) continue;
+
+    const key =
+      child?.school_id ||
+      school?.id ||
+      `${schoolName}:${school?.address || stop.address || `${position.latitude},${position.longitude}`}`;
+    const existing = schoolStops.get(String(key));
+    if (!existing || stop.stop_order < existing.stop_order) {
+      schoolStops.set(String(key), {
+        ...stop,
+        id: `school-${key}`,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        marker_type: "school",
+        marker_label: schoolName,
+        stop_order: stop.stop_order,
+      });
+    }
+  }
+
+  return [...pickupStops, ...schoolStops.values()].sort(
+    (first, second) => (first.stop_order || 0) - (second.stop_order || 0),
+  );
+};
+
+function LiveTrackingMap({ trips, selectedId }) {
+  const map = useMap();
+  const lastFittedRoutes = useRef("");
+
+  useEffect(() => {
+    if (!map || !trips.length) return;
+
+    const routeSignature = trips
+      .map((trip) =>
+        [
+          trip.id,
+          ...trip.routePoints.map(
+            ({ latitude, longitude }) => `${latitude},${longitude}`,
+          ),
+        ].join(":"),
+      )
+      .join("|");
+    const selectionSignature = `${selectedId || ""}:${routeSignature}`;
+    if (lastFittedRoutes.current === selectionSignature) {
+      const selectedTrip =
+        trips.find((trip) => trip.id === selectedId) || trips[0];
+      map.panTo({
+        lat: selectedTrip.location.latitude,
+        lng: selectedTrip.location.longitude,
+      });
+      return;
+    }
+
+    lastFittedRoutes.current = selectionSignature;
+    const points = trips.flatMap((trip) => [
+      ...trip.routePoints,
+      trip.location,
+    ]);
+    if (points.length === 1) {
+      map.setCenter({ lat: points[0].latitude, lng: points[0].longitude });
+      map.setZoom(15);
+      return;
+    }
+
+    const bounds = new window.google.maps.LatLngBounds();
+    points.forEach(({ latitude, longitude }) =>
+      bounds.extend({ lat: latitude, lng: longitude }),
+    );
+    map.fitBounds(bounds, { top: 56, right: 48, bottom: 56, left: 48 });
+  }, [map, selectedId, trips]);
+
+  return (
+    <>
+      {trips.flatMap((trip) =>
+        trip.stops.map((stop) => {
+          const position = parseCoordinate(
+            stop.latitude,
+            stop.longitude,
+            stop.address,
+          );
+          if (!position) return null;
+          return (
+            <AdvancedMarker
+              key={`${trip.id}-${stop.id}-${stop.marker_type || stop.stop_type}`}
+              position={{ lat: position.latitude, lng: position.longitude }}
+              title={`${stop.marker_type === "school" ? "School" : "Pickup"}: ${stop.marker_label} · ${trip.vehicleLabel}`}
+              anchorPoint={AdvancedMarkerAnchorPoint.CENTER}
+            >
+              <span className={`google-tracking-stop ${stop.marker_type}`}>
+                {stop.marker_label}
+              </span>
+            </AdvancedMarker>
+          );
+        }),
+      )}
+      {trips.map((trip) => (
+        <AdvancedMarker
+          key={trip.id}
+          position={{
+            lat: trip.location.latitude,
+            lng: trip.location.longitude,
+          }}
+          title={`${trip.vehicleLabel} · ${trip.route_name} · Live location`}
+          anchorPoint={AdvancedMarkerAnchorPoint.CENTER}
+          zIndex={trip.id === selectedId ? 10 : 9}
+        >
+          <span className="google-tracking-vehicle is-live">
+            <FaBus />
+            <span>{trip.vehicleLabel}</span>
+          </span>
+        </AdvancedMarker>
+      ))}
+    </>
+  );
+}
+
+function parseCoordinate(latitude, longitude, fallback) {
+  const hasCoordinates =
+    latitude !== null &&
+    latitude !== undefined &&
+    latitude !== "" &&
+    longitude !== null &&
+    longitude !== undefined &&
+    longitude !== "";
+  const parsedLatitude = hasCoordinates ? Number(latitude) : NaN;
+  const parsedLongitude = hasCoordinates ? Number(longitude) : NaN;
+  if (Number.isFinite(parsedLatitude) && Number.isFinite(parsedLongitude)) {
+    return { latitude: parsedLatitude, longitude: parsedLongitude };
+  }
+  const values = String(fallback || "")
+    .split(",")
+    .map((value) => Number(value.trim()));
+  return Number.isFinite(values[0]) && Number.isFinite(values[1])
+    ? { latitude: values[0], longitude: values[1] }
+    : null;
 }
 
 function LiveTracking() {
@@ -88,73 +271,78 @@ function LiveTracking() {
     };
   }, [auth.user?.id, loadTracking]);
 
-  const trips = useMemo(() => tracking?.trips || [], [tracking?.trips]);
+  const schoolStudentIds = useMemo(
+    () =>
+      new Set((tracking?.students || []).map((student) => String(student.id))),
+    [tracking?.students],
+  );
+  const trips = useMemo(
+    () =>
+      (tracking?.trips || []).map((trip) => ({
+        ...trip,
+        stops: getSchoolRouteStops(
+          (trip.stops || []).filter((stop) =>
+            schoolStudentIds.has(String(stop.child_id)),
+          ),
+        ),
+      })),
+    [schoolStudentIds, tracking?.trips],
+  );
   const mapTrips = useMemo(
     () =>
       trips.filter((trip) => trip.is_active_route && trip.is_in_time_window),
     [trips],
   );
+  const mapLiveTrips = useMemo(
+    () =>
+      mapTrips.flatMap((trip) => {
+        if (!trip.is_online) return [];
+        const location = parseCoordinate(
+          trip.location?.latitude,
+          trip.location?.longitude,
+        );
+        if (!location) return [];
+        const routePoints = [
+          parseCoordinate(
+            trip.start_latitude,
+            trip.start_longitude,
+            trip.start_location,
+          ),
+          ...trip.stops.map((stop) =>
+            parseCoordinate(stop.latitude, stop.longitude, stop.address),
+          ),
+          parseCoordinate(
+            trip.end_latitude,
+            trip.end_longitude,
+            trip.end_location,
+          ),
+        ].filter(Boolean);
+        return [
+          {
+            ...trip,
+            location,
+            routePoints,
+            vehicleLabel:
+              trip.vehicle?.license_plate || trip.vehicle?.name || "Vehicle",
+          },
+        ];
+      }),
+    [mapTrips],
+  );
   const selectedTrip =
-    trips.find((trip) => trip.id === selectedId) || trips[0] || null;
-  const selectedMapTrip =
-    mapTrips.find((trip) => trip.id === selectedId) ||
-    (selectedId ? null : mapTrips[0]) ||
+    trips.find((trip) => trip.id === selectedId) ||
+    mapLiveTrips[0] ||
+    mapTrips[0] ||
+    trips[0] ||
     null;
-  const parseCoordinate = (latitude, longitude, fallback) => {
-    const parsedLatitude = Number(latitude);
-    const parsedLongitude = Number(longitude);
-    if (Number.isFinite(parsedLatitude) && Number.isFinite(parsedLongitude)) {
-      return { latitude: parsedLatitude, longitude: parsedLongitude };
-    }
-    const values = String(fallback || "")
-      .split(",")
-      .map((value) => Number(value.trim()));
-    return Number.isFinite(values[0]) && Number.isFinite(values[1])
-      ? { latitude: values[0], longitude: values[1] }
-      : null;
-  };
-  const selectedRoutePoints = useMemo(() => {
-    if (!selectedMapTrip) return [];
-    return [
-      parseCoordinate(
-        selectedMapTrip.start_latitude,
-        selectedMapTrip.start_longitude,
-        selectedMapTrip.start_location,
-      ),
-      ...(selectedMapTrip.stops || []).map((stop) =>
-        parseCoordinate(stop.latitude, stop.longitude, stop.address),
-      ),
-      parseCoordinate(
-        selectedMapTrip.end_latitude,
-        selectedMapTrip.end_longitude,
-        selectedMapTrip.end_location,
-      ),
-    ].filter(Boolean);
-  }, [selectedMapTrip]);
-  const mapBounds = useMemo(() => {
-    if (!selectedRoutePoints.length) return null;
-    const latitudes = selectedRoutePoints.map((point) => point.latitude);
-    const longitudes = selectedRoutePoints.map((point) => point.longitude);
-    const minLatitude = Math.min(...latitudes);
-    const maxLatitude = Math.max(...latitudes);
-    const minLongitude = Math.min(...longitudes);
-    const maxLongitude = Math.max(...longitudes);
-    return { minLatitude, maxLatitude, minLongitude, maxLongitude };
-  }, [selectedRoutePoints]);
-  const getMapPoint = (point) => {
-    if (!mapBounds) return null;
-    const latitudeRange =
-      mapBounds.maxLatitude - mapBounds.minLatitude || 0.001;
-    const longitudeRange =
-      mapBounds.maxLongitude - mapBounds.minLongitude || 0.001;
-    return {
-      x:
-        10 + ((point.longitude - mapBounds.minLongitude) / longitudeRange) * 80,
-      y:
-        10 +
-        (1 - (point.latitude - mapBounds.minLatitude) / latitudeRange) * 80,
-    };
-  };
+  const mapCanShowLocation = mapLiveTrips.length > 0;
+  const hideTrackingPlaceholder =
+    trips.length > 0 && !trips.some((trip) => trip.is_in_time_window);
+  const mapPlaceholderMessage = !trips.length
+    ? "No school routes are available to track."
+    : !trips.some((trip) => trip.is_in_time_window)
+      ? "No vehicles are currently within their scheduled tracking windows."
+      : "No vehicles within their tracking windows are currently sharing a live GPS location.";
   const metrics = tracking?.metrics || {};
   const formatTime = (value) =>
     value
@@ -188,22 +376,25 @@ function LiveTracking() {
 
   return (
     <div className="portal-content tracking-content">
-      <section className="tracking-heading">
-        <div>
-          <p className="page-kicker">REAL-TIME MONITORING</p>
-          <h1>Live Tracking</h1>
-          <p>Track vehicles and students in real-time.</p>
-        </div>
-        <div className="tracking-controls">
-          <button>
-            All Routes <FiChevronDown />
-          </button>
-          <button>
-            <FiAlertCircle /> Live data
-          </button>
-          <button aria-label="Full screen">⛶</button>
-        </div>
-      </section>
+      <SchoolPageHeader
+        className="tracking-heading"
+        actionsClassName="tracking-controls"
+        eyebrow="REAL-TIME MONITORING"
+        titleIcon={<span className="school-page-heading-icon"><FiCrosshair /></span>}
+        title="Live Tracking"
+        description="Track vehicles and students in real-time."
+        actions={
+          <>
+            <button>
+              All Routes <FiChevronDown />
+            </button>
+            <button>
+              <FiAlertCircle /> Live data
+            </button>
+            <button aria-label="Full screen">⛶</button>
+          </>
+        }
+      />
       <section className="tracking-metrics">
         <article>
           <span className="tracking-metric green">
@@ -259,101 +450,92 @@ function LiveTracking() {
       <section className="tracking-layout">
         <div className="tracking-main">
           <div className="tracking-map">
-            <div className="map-switch">
-              <button className="selected">Map</button>
-              <button>Satellite</button>
-            </div>
-            <div className="map-controls">
-              <button>+</button>
-              <button>-</button>
-              <button>
-                <FiCrosshair />
-              </button>
-              <button>
-                <FiLayers />
-              </button>
-            </div>
-            <div className="map-roads" />
-            {selectedRoutePoints.length > 1 && (
-              <svg
-                className="map-route-line"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
+            {GOOGLE_MAPS_API_KEY && mapCanShowLocation ? (
+              <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+                <GoogleMap
+                  className="tracking-google-map"
+                  style={{ width: "100%", height: "100%" }}
+                  defaultCenter={{
+                    lat: mapLiveTrips[0].location.latitude,
+                    lng: mapLiveTrips[0].location.longitude,
+                  }}
+                  defaultZoom={12}
+                  mapId="school-live-tracking-map"
+                  clickableIcons={false}
+                  gestureHandling="greedy"
+                  mapTypeControl
+                  zoomControl
+                  fullscreenControl
+                  streetViewControl={false}
+                >
+                  <LiveTrackingMap
+                    trips={mapLiveTrips}
+                    selectedId={selectedId}
+                  />
+                </GoogleMap>
+              </APIProvider>
+            ) : hideTrackingPlaceholder ? null : (
+              <div
+                className={`tracking-map-empty-placeholder ${
+                  !GOOGLE_MAPS_API_KEY ? "has-error" : ""
+                }`}
               >
-                <polyline
-                  points={selectedRoutePoints
-                    .map((point) => {
-                      const position = getMapPoint(point);
-                      return `${position.x},${position.y}`;
-                    })
-                    .join(" ")}
-                />
-              </svg>
-            )}
-            {selectedMapTrip?.stops?.map((stop) => {
-              const position = getMapPoint(stop);
-              if (!position) return null;
-              return (
-                <span
-                  className="map-stop"
-                  key={stop.id}
-                  style={{ left: `${position.x}%`, top: `${position.y}%` }}
-                  title={`${stop.stop_type || "Stop"}: ${stop.address || "Location"}`}
-                >
-                  {stop.stop_order}
-                </span>
-              );
-            })}
-            {(selectedMapTrip || !selectedId ? mapTrips : [])
-              .slice(0, 3)
-              .map((trip, index) => (
-                <button
-                  key={trip.id}
-                  className={`map-route route-${["one", "two", "three"][index]}`}
-                  onClick={() => setSelectedId(trip.id)}
-                  aria-label={`Select ${trip.route_name}`}
-                >
-                  <i />
-                  <i />
-                  <i />
-                  <b>
+                <span className="tracking-placeholder-icon">
+                  {!GOOGLE_MAPS_API_KEY ? (
+                    <FiAlertCircle />
+                  ) : !selectedTrip ? (
+                    <FiMapPin />
+                  ) : !selectedTrip?.is_in_time_window ? (
+                    <FiClock />
+                  ) : (
                     <FaBus />
-                  </b>
-                </button>
-              ))}
-            {!selectedMapTrip && (
-              <div className="tracking-map-empty">
-                This vehicle is offline or outside its tracking window.
+                  )}
+                </span>
+                <strong>
+                  {!GOOGLE_MAPS_API_KEY
+                    ? "Map unavailable"
+                    : !trips.length
+                      ? "No routes to track"
+                      : !mapTrips.length
+                        ? "Outside tracking windows"
+                        : "No live vehicle locations"}
+                </strong>
+                <span>
+                  {!GOOGLE_MAPS_API_KEY
+                    ? "Google Maps is unavailable because VITE_GOOGLE_MAPS_API_KEY is not configured."
+                    : mapPlaceholderMessage}
+                </span>
+                {selectedTrip?.route_name && trips.length === 1 ? (
+                  <small>
+                    {selectedTrip.route_name} ·{" "}
+                    {selectedTrip.vehicle?.license_plate ||
+                      selectedTrip.vehicle?.name ||
+                      "Vehicle"}
+                  </small>
+                ) : null}
               </div>
             )}
-            {selectedMapTrip && (
+            {mapCanShowLocation ? (
               <div className="vehicle-popover">
                 <strong>
-                  {selectedMapTrip.vehicle?.license_plate ||
-                    selectedMapTrip.vehicle?.name ||
-                    "Vehicle"}
+                  {mapLiveTrips.length} live vehicle
+                  {mapLiveTrips.length === 1 ? "" : "s"}
                 </strong>
-                <span>{selectedMapTrip.status}</span>
-                <small>
-                  <FiUsers /> {selectedMapTrip.students} students
-                </small>
-                <small>
-                  <FiMapPin /> {selectedMapTrip.route_name}
-                </small>
+                {mapLiveTrips.map((trip) => (
+                  <small key={trip.id}>
+                    <FaBus /> {trip.vehicleLabel} · {trip.route_name}
+                  </small>
+                ))}
               </div>
-            )}
-            <div className="map-legend">
-              <strong>Vehicle Status</strong>
-              <span>
-                <i className="legend-green" /> On Route
-              </span>
-              <span>
-                <i className="legend-orange" /> Stopped
-              </span>
-              <span>
-                <i className="legend-gray" /> Offline
-              </span>
-            </div>
+            ) : null}
+            {mapCanShowLocation ? (
+              <div className="map-legend">
+                <strong>Live tracking</strong>
+                <span>
+                  <i className="legend-green" /> On Route
+                </span>
+              </div>
+            ) : null}
           </div>
           <div className="active-trips">
             <div className="active-trips-head">
@@ -381,6 +563,13 @@ function LiveTracking() {
                   <span>
                     <b className="mini-vehicle green">
                       <FaBus />
+                      {getVehicleImage(trip.vehicle) && (
+                        <img
+                          src={getVehicleImage(trip.vehicle)}
+                          alt=""
+                          loading="lazy"
+                        />
+                      )}
                     </b>
                     {trip.vehicle?.license_plate ||
                       trip.vehicle?.name ||
@@ -469,6 +658,13 @@ function LiveTracking() {
               <div className="vehicle-profile">
                 <span className="vehicle-large">
                   <FaBus />
+                  {getVehicleImage(selectedTrip.vehicle) && (
+                    <img
+                      src={getVehicleImage(selectedTrip.vehicle)}
+                      alt=""
+                      loading="lazy"
+                    />
+                  )}
                 </span>
                 <div>
                   <strong>
@@ -502,22 +698,6 @@ function LiveTracking() {
                   <dd>{selectedTrip.status}</dd>
                 </dl>
                 <i className="detail-progress" />
-              </div>
-              <div className="next-stop">
-                <div>
-                  <h3>Location</h3>
-                  <strong>
-                    <FiMapPin />{" "}
-                    {selectedTrip.location
-                      ? `${selectedTrip.location.latitude}, ${selectedTrip.location.longitude}`
-                      : "Unavailable"}
-                  </strong>
-                  <small>
-                    {selectedTrip.is_online
-                      ? "Live location"
-                      : "Waiting for driver location"}
-                  </small>
-                </div>
               </div>
             </>
           ) : (

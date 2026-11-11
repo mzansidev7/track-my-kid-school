@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router-dom";
 import {
-  FiArrowLeft,
   FiChevronLeft,
   FiChevronRight,
   FiDownload,
   FiFile,
-  FiHeart,
+  FiInfo,
+  FiMessageSquare,
   FiMic,
   FiMoreVertical,
   FiPaperclip,
   FiPhone,
+  FiPlus,
   FiSearch,
   FiSend,
   FiSmile,
@@ -20,18 +22,22 @@ import {
 } from "react-icons/fi";
 import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
+import logo from "../assets/images/logo.png";
 import {
   showDeleteConfirmationAlert,
   showErrorAlert,
   showSuccessAlert,
 } from "../components/sweetAlert.js";
 import "../styles/messages.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
+import { PresenceDot, PresenceStatus } from "../presence/PresenceIndicator";
 
-const tabs = ["All", "Parents", "Drivers", "Staff"];
+const tabs = ["All", "Parents", "Drivers", "Staff", "Groups"];
 const roleByTab = {
   Parents: "Parent",
   Drivers: "Driver",
   Staff: "Staff",
+  Groups: "Group chat",
 };
 const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS_PER_MESSAGE = 20;
@@ -49,16 +55,77 @@ const ALLOWED_ATTACHMENT_TYPES = new Set([
   "audio/x-wav",
   "audio/webm",
   "audio/3gpp",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+  "video/3gpp",
+  "video/3gpp2",
 ]);
 const EMOJI_CATEGORIES = [
-  { name: "Smileys", icon: "😀", emojis: "😀 😃 😄 😁 😆 😅 😂 🤣 🥲 ☺️ 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😋 😛 😜 🤪 🤗 🤔 😎 🥳 😕 🙁 😮 😳 🥺 🥹 😢 😭 😱 😤 😡 🤬 😴 🤒 🤢 🤧 🥶 🥵 🤯 👻 💩".split(" ") },
-  { name: "People", icon: "👋", emojis: "👋 🤚 ✋ 🖐️ 👌 🤌 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 👍 👎 👏 🙌 🫶 🙏 💪 🦾 🦵 👂 👃 👀 👶 🧒 🧑 👨 👩 🧓 🙋 🙆 🙅 🤷 🤦 💃 🕺 🏃 🚶".split(" ") },
-  { name: "Animals", icon: "🐻", emojis: "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🦆 🦉 🦇 🐺 🐴 🦄 🐝 🦋 🐞 🐢 🐍 🦎 🐙 🦑 🦀 🐠 🐟 🐬 🐳 🦈 🐘 🦒 🐕 🐈 🦜 🦢".split(" ") },
-  { name: "Food", icon: "🍕", emojis: "🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍒 🍑 🥭 🍍 🥝 🍅 🥑 🥦 🥕 🌽 🥐 🍞 🧀 🥚 🍳 🥞 🥓 🍔 🍟 🍕 🌮 🌯 🥗 🍝 🍜 🍣 🍱 🍰 🎂 🍪 🍩 🍫 🍿 ☕ 🧃 🥤 🍺 🍷".split(" ") },
-  { name: "Travel", icon: "🚗", emojis: "🚗 🚕 🚙 🚌 🏎️ 🚓 🚑 🚒 🚐 🚚 🚜 🛵 🏍️ 🚲 🛴 🚦 ⚓ ⛵ 🚤 🚢 ✈️ 🛫 🛬 🚁 🚀 🛸 🌍 🗺️ 🧭 🏔️ 🏕️ 🏖️ 🏝️ 🏠 🏢 🏥 🏫 🏰 🗼 🌅 🌆 🌉".split(" ") },
-  { name: "Activities", icon: "⚽", emojis: "⚽ 🏀 🏈 ⚾ 🎾 🏐 🏉 🎱 🏓 🏸 🥊 🥋 🛹 🛼 ⛸️ 🎿 🏂 🏋️ 🤼 🤸 🏇 🧘 🏄 🏊 🏆 🥇 🥈 🥉 🎖️ 🎨 🎬 🎤 🎧 🎹 🥁 🎷 🎸 🎻 🎲 🎯 🎳 🎮 🧩 🎉 🎊".split(" ") },
-  { name: "Objects", icon: "💡", emojis: "💌 💝 💖 💗 💓 💞 💕 💔 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💯 💢 💥 💫 💦 💬 💭 💤 💻 📱 ☎️ 📷 🎥 💡 🔦 📚 📝 📌 ✂️ 🔒 🔑 🔨 🔧 🧰 💉 💊 🛏️ 🚿 🛒 🎁 🏷️".split(" ") },
-  { name: "Symbols", icon: "✅", emojis: "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 ☮️ ✝️ ☪️ 🕉️ ☸️ ✡️ ☯️ ♈ ♉ ♊ ♋ ♌ ♍ ♎ ♏ ♐ ♑ ♒ ♓ ✅ ❎ ❌ ⭕ 🚫 ❗ ❓ ‼️ ⁉️ ⚠️ ➕ ➖ ➗ ✖️ ♾️ ✔️ ☑️ 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪ ⭐ 🌟 ✨ ⚡ 🔥 💧 🌈 ☀️ 🌙".split(" ") },
+  {
+    name: "Smileys",
+    icon: "😀",
+    emojis:
+      "😀 😃 😄 😁 😆 😅 😂 🤣 🥲 ☺️ 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😋 😛 😜 🤪 🤗 🤔 😎 🥳 😕 🙁 😮 😳 🥺 🥹 😢 😭 😱 😤 😡 🤬 😴 🤒 🤢 🤧 🥶 🥵 🤯 👻 💩".split(
+        " ",
+      ),
+  },
+  {
+    name: "People",
+    icon: "👋",
+    emojis:
+      "👋 🤚 ✋ 🖐️ 👌 🤌 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 👍 👎 👏 🙌 🫶 🙏 💪 🦾 🦵 👂 👃 👀 👶 🧒 🧑 👨 👩 🧓 🙋 🙆 🙅 🤷 🤦 💃 🕺 🏃 🚶".split(
+        " ",
+      ),
+  },
+  {
+    name: "Animals",
+    icon: "🐻",
+    emojis:
+      "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🦆 🦉 🦇 🐺 🐴 🦄 🐝 🦋 🐞 🐢 🐍 🦎 🐙 🦑 🦀 🐠 🐟 🐬 🐳 🦈 🐘 🦒 🐕 🐈 🦜 🦢".split(
+        " ",
+      ),
+  },
+  {
+    name: "Food",
+    icon: "🍕",
+    emojis:
+      "🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍒 🍑 🥭 🍍 🥝 🍅 🥑 🥦 🥕 🌽 🥐 🍞 🧀 🥚 🍳 🥞 🥓 🍔 🍟 🍕 🌮 🌯 🥗 🍝 🍜 🍣 🍱 🍰 🎂 🍪 🍩 🍫 🍿 ☕ 🧃 🥤 🍺 🍷".split(
+        " ",
+      ),
+  },
+  {
+    name: "Travel",
+    icon: "🚗",
+    emojis:
+      "🚗 🚕 🚙 🚌 🏎️ 🚓 🚑 🚒 🚐 🚚 🚜 🛵 🏍️ 🚲 🛴 🚦 ⚓ ⛵ 🚤 🚢 ✈️ 🛫 🛬 🚁 🚀 🛸 🌍 🗺️ 🧭 🏔️ 🏕️ 🏖️ 🏝️ 🏠 🏢 🏥 🏫 🏰 🗼 🌅 🌆 🌉".split(
+        " ",
+      ),
+  },
+  {
+    name: "Activities",
+    icon: "⚽",
+    emojis:
+      "⚽ 🏀 🏈 ⚾ 🎾 🏐 🏉 🎱 🏓 🏸 🥊 🥋 🛹 🛼 ⛸️ 🎿 🏂 🏋️ 🤼 🤸 🏇 🧘 🏄 🏊 🏆 🥇 🥈 🥉 🎖️ 🎨 🎬 🎤 🎧 🎹 🥁 🎷 🎸 🎻 🎲 🎯 🎳 🎮 🧩 🎉 🎊".split(
+        " ",
+      ),
+  },
+  {
+    name: "Objects",
+    icon: "💡",
+    emojis:
+      "💌 💝 💖 💗 💓 💞 💕 💔 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💯 💢 💥 💫 💦 💬 💭 💤 💻 📱 ☎️ 📷 🎥 💡 🔦 📚 📝 📌 ✂️ 🔒 🔑 🔨 🔧 🧰 💉 💊 🛏️ 🚿 🛒 🎁 🏷️".split(
+        " ",
+      ),
+  },
+  {
+    name: "Symbols",
+    icon: "✅",
+    emojis:
+      "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 ☮️ ✝️ ☪️ 🕉️ ☸️ ✡️ ☯️ ♈ ♉ ♊ ♋ ♌ ♍ ♎ ♏ ♐ ♑ ♒ ♓ ✅ ❎ ❌ ⭕ 🚫 ❗ ❓ ‼️ ⁉️ ⚠️ ➕ ➖ ➗ ✖️ ♾️ ✔️ ☑️ 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪ ⭐ 🌟 ✨ ⚡ 🔥 💧 🌈 ☀️ 🌙".split(
+        " ",
+      ),
+  },
   "📦",
   "🛠️",
 ];
@@ -75,6 +142,7 @@ function getAttachmentMediaType(mimeType) {
   if (normalized.startsWith("image/")) return "image";
   if (normalized === "application/pdf") return "pdf";
   if (normalized.startsWith("audio/")) return "audio";
+  if (normalized.startsWith("video/")) return "video";
   return null;
 }
 
@@ -142,8 +210,10 @@ function parseMessageAttachment(content) {
   try {
     const value = JSON.parse(content);
     const normalizeAttachment = (item) => {
-      if (!item || typeof item.url !== "string") return null;
-      const url = new URL(item.url);
+      if (!item || typeof item !== "object") return null;
+      const attachmentUrl = item.url || item.fileUrl || item.file_url;
+      if (typeof attachmentUrl !== "string") return null;
+      const url = new URL(attachmentUrl);
       const isRemoteUrl = ["http:", "https:"].includes(url.protocol);
       const isLocalPreviewUrl =
         url.protocol === "blob:" && url.origin === window.location.origin;
@@ -151,29 +221,65 @@ function parseMessageAttachment(content) {
       const mimeType = String(
         item.mimeType || item.mime_type || "",
       ).toLowerCase();
+      const rawDeclaredType = item.mediaType || item.media_type;
+      const declaredType =
+        typeof rawDeclaredType === "string"
+          ? rawDeclaredType.toLowerCase()
+          : "";
+      const extension = url.pathname.split(".").pop()?.toLowerCase();
       const mediaType =
-        item.mediaType ||
-        item.media_type ||
-        (mimeType.startsWith("image/")
+        declaredType === "image" ||
+        (typeof declaredType === "string" &&
+          declaredType.startsWith("image/")) ||
+        mimeType.startsWith("image/")
           ? "image"
-          : mimeType.startsWith("audio/")
+          : declaredType === "audio" ||
+              (typeof declaredType === "string" &&
+                declaredType.startsWith("audio/")) ||
+              mimeType.startsWith("audio/")
             ? "audio"
-            : mimeType === "application/pdf"
+            : declaredType === "pdf" || mimeType === "application/pdf"
               ? "pdf"
-              : "");
-      if (!["image", "audio", "pdf"].includes(mediaType)) return null;
+              : declaredType === "video" ||
+                  declaredType.startsWith("video/") ||
+                  mimeType.startsWith("video/")
+                ? "video"
+                : ["jpg", "jpeg", "png", "gif", "webp"].includes(extension)
+                  ? "image"
+                  : ["mp3", "m4a", "aac", "wav", "webm", "ogg", "3gp"].includes(
+                        extension,
+                      )
+                    ? "audio"
+                    : ["mp4", "mov", "m4v", "3gp"].includes(extension)
+                      ? "video"
+                      : extension === "pdf"
+                        ? "pdf"
+                        : "";
+      if (!["image", "audio", "video", "pdf"].includes(mediaType)) return null;
+      const name =
+        typeof item.name === "string"
+          ? item.name
+          : typeof item.fileName === "string"
+            ? item.fileName
+            : "Attachment";
       return {
         mediaType,
         url: url.href,
-        name: typeof item.name === "string" ? item.name : "Attachment",
+        name,
+        mimeType,
       };
     };
-    const attachments =
-      value?.type === "attachment" && value.url
-        ? [normalizeAttachment(value)].filter(Boolean)
+    const attachments = (
+      (value?.type === "attachment" ||
+        value?.url ||
+        value?.fileUrl ||
+        value?.file_url) &&
+      (value.url || value.fileUrl || value.file_url)
+        ? [normalizeAttachment(value)]
         : value?.type === "attachment_group" && Array.isArray(value.attachments)
-          ? value.attachments.map(normalizeAttachment).filter(Boolean)
-          : [];
+          ? value.attachments.map(normalizeAttachment)
+          : []
+    ).filter(Boolean);
     if (!attachments.length) return null;
     return {
       attachments,
@@ -182,6 +288,37 @@ function parseMessageAttachment(content) {
   } catch {
     return null;
   }
+}
+
+function formatAudioDuration(value) {
+  if (!Number.isFinite(value) || value < 0) return "--:--";
+  const seconds = Math.floor(value);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function MessageAudioAttachment({ item }) {
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  return (
+    <div className="message-audio">
+      <audio
+        className="message-attachment-audio"
+        controls
+        preload="metadata"
+        src={item.url}
+        aria-label={item.name || "Voice message"}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+        onTimeUpdate={(event) =>
+          setCurrentTime(event.currentTarget.currentTime)
+        }
+        onEnded={() => setCurrentTime(0)}
+      />
+      <span className="message-audio-duration">
+        {formatAudioDuration(currentTime)} / {formatAudioDuration(duration)}
+      </span>
+    </div>
+  );
 }
 
 function getMessagePreview(content) {
@@ -255,6 +392,9 @@ function isCurrentUserParticipant(person, userId) {
 
 function Messages() {
   const auth = getAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedConversationId = searchParams.get("conversationId");
+  const autoOpenedConversationIdRef = useRef(null);
   const conversationsCacheKey = `schoolConversationsCache:${auth.user?.id || "current"}`;
   const messagesCachePrefix = `schoolMessagesCache:${auth.user?.id || "current"}`;
   const [conversations, setConversations] = useState(() =>
@@ -273,6 +413,20 @@ function Messages() {
   const [sending, setSending] = useState(false);
   const [staff, setStaff] = useState([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [groupCandidates, setGroupCandidates] = useState([]);
+  const [loadingGroupCandidates, setLoadingGroupCandidates] = useState(false);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  const [groupSearch, setGroupSearch] = useState("");
+  const [groupGradeFilter, setGroupGradeFilter] = useState("All");
+  const [includeSupportTeam, setIncludeSupportTeam] = useState(false);
+  const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState([]);
+  const [detailsRemoveMode, setDetailsRemoveMode] = useState(false);
+  const [detailsRemoveUserIds, setDetailsRemoveUserIds] = useState([]);
+  const [detailsRemoveError, setDetailsRemoveError] = useState("");
+  const [detailsRemoveSaving, setDetailsRemoveSaving] = useState(false);
+  const [groupDetailsOpen, setGroupDetailsOpen] = useState(false);
   const [conversationError, setConversationError] = useState("");
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [deletingConversation, setDeletingConversation] = useState(false);
@@ -286,10 +440,24 @@ function Messages() {
   const [emojiSearch, setEmojiSearch] = useState("");
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState(null);
   const [reactionPickerPosition, setReactionPickerPosition] = useState(null);
+  const reactionRequestsRef = useRef(new Set());
+  const reactionListRefs = useRef(new Map());
+  useEffect(() => {
+    for (const [messageId, element] of reactionListRefs.current) {
+      if (messages.some((message) => message.id === messageId)) {
+        element.scrollLeft =
+          element.children.length > 1
+            ? element.scrollWidth - element.clientWidth
+            : 0;
+      }
+    }
+  }, [messages]);
   const [emojiPopupPosition, setEmojiPopupPosition] = useState(null);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [composerError, setComposerError] = useState("");
+  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
+  const [attachmentAccept, setAttachmentAccept] = useState("");
   const fileInputRef = useRef(null);
   const draftInputRef = useRef(null);
   const selectedConversationIdRef = useRef(null);
@@ -319,10 +487,7 @@ function Messages() {
       const rect = button.getBoundingClientRect();
       const width = Math.min(430, window.innerWidth - 24);
       setEmojiPopupPosition({
-        left: Math.max(
-          12,
-          Math.min(rect.left, window.innerWidth - width - 12),
-        ),
+        left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
         bottom: Math.max(12, window.innerHeight - rect.top + 8),
         width,
       });
@@ -642,6 +807,10 @@ function Messages() {
     async (conversation) => {
       selectedConversationIdRef.current = conversation.id;
       setSelectedConversation(conversation);
+      setGroupDetailsOpen(false);
+      setDetailsRemoveMode(false);
+      setDetailsRemoveUserIds([]);
+      setDetailsRemoveError("");
       const cacheKey = `${messagesCachePrefix}:${conversation.id}`;
       const cachedMessages = readCache(cacheKey, null);
       if (Array.isArray(cachedMessages)) {
@@ -666,6 +835,42 @@ function Messages() {
     },
     [auth.token, loadConversations, loadMessages, messagesCachePrefix],
   );
+
+  useEffect(() => {
+    if (!requestedConversationId) {
+      autoOpenedConversationIdRef.current = null;
+      return;
+    }
+    if (
+      loading ||
+      autoOpenedConversationIdRef.current === requestedConversationId
+    ) {
+      return;
+    }
+    const conversation = conversations.find(
+      (item) => String(item.id) === requestedConversationId,
+    );
+    if (!conversation) return;
+
+    autoOpenedConversationIdRef.current = requestedConversationId;
+    window.setTimeout(() => {
+      void openConversation(conversation);
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.delete("conversationId");
+          return next;
+        },
+        { replace: true },
+      );
+    }, 0);
+  }, [
+    conversations,
+    loading,
+    openConversation,
+    requestedConversationId,
+    setSearchParams,
+  ]);
 
   const deleteConversation = async () => {
     if (!selectedConversation || deletingConversation) return;
@@ -797,46 +1002,56 @@ function Messages() {
   }, [activeTab, auth.user?.id, conversations, search]);
 
   const toggleMessageReaction = async (message, emoji) => {
-    if (!selectedConversation || String(message.id).startsWith("optimistic-")) return;
+    if (
+      !selectedConversation ||
+      String(message.sender_id) === String(auth.user?.id) ||
+      String(message.id).startsWith("optimistic-") ||
+      reactionRequestsRef.current.has(message.id)
+    )
+      return;
+    reactionRequestsRef.current.add(message.id);
     const previousReactions = message.reactions || [];
-    const selected = previousReactions.find((reaction) => reaction.emoji === emoji);
-    const userAlreadyReacted =
-      selected?.userIds?.includes(auth.user?.id) || selected?.reactedByMe;
-    const optimisticReactions = userAlreadyReacted
-      ? previousReactions
-          .map((reaction) =>
-            reaction.emoji === emoji
-              ? {
-                  ...reaction,
-                  count: reaction.count - 1,
-                  userIds: reaction.userIds?.filter(
-                    (id) => id !== auth.user?.id,
-                  ),
-                  reactedByMe: false,
-                }
-              : reaction,
-          )
-          .filter((reaction) => reaction.count > 0)
-      : selected
-        ? previousReactions.map((reaction) =>
-            reaction.emoji === emoji
-              ? {
-                  ...reaction,
-                  count: reaction.count + 1,
-                  userIds: [...(reaction.userIds || []), auth.user?.id],
-                  reactedByMe: true,
-                }
-              : reaction,
-          )
-        : [
-            ...previousReactions,
-            {
-              emoji,
-              count: 1,
-              userIds: [auth.user?.id],
-              reactedByMe: true,
-            },
-          ];
+    const userId = String(auth.user?.id || "");
+    const previousUserReaction = previousReactions.find(
+      (reaction) =>
+        reaction.userIds?.some((id) => String(id) === userId) ||
+        reaction.reactedByMe,
+    );
+    const removingReaction = previousUserReaction?.emoji === emoji;
+    let targetFound = false;
+    const optimisticReactions = previousReactions
+      .map((reaction) => {
+        const userReacted =
+          reaction.userIds?.some((id) => String(id) === userId) ||
+          reaction.reactedByMe;
+        const isTarget = reaction.emoji === emoji;
+        if (isTarget) targetFound = true;
+        const userIds = userReacted
+          ? (reaction.userIds || []).filter((id) => String(id) !== userId)
+          : [...(reaction.userIds || [])];
+        const addingReaction = isTarget && !removingReaction && !userReacted;
+        if (addingReaction && !userIds.some((id) => String(id) === userId)) {
+          userIds.push(auth.user?.id);
+        }
+        return {
+          ...reaction,
+          count:
+            reaction.count - (userReacted ? 1 : 0) + (addingReaction ? 1 : 0),
+          userIds,
+          reactedByMe:
+            (isTarget && !removingReaction) ||
+            (reaction.reactedByMe && !userReacted),
+        };
+      })
+      .filter((reaction) => reaction.count > 0);
+    if (!targetFound && !removingReaction) {
+      optimisticReactions.push({
+        emoji,
+        count: 1,
+        userIds: [auth.user?.id],
+        reactedByMe: true,
+      });
+    }
     setMessages((current) =>
       current.map((item) =>
         item.id === message.id
@@ -872,6 +1087,8 @@ function Messages() {
         ),
       );
       setComposerError(error.message || "Reaction could not be saved.");
+    } finally {
+      reactionRequestsRef.current.delete(message.id);
     }
   };
 
@@ -885,7 +1102,10 @@ function Messages() {
     const popupWidth = 212;
     const popupHeight = 44;
     setReactionPickerPosition({
-      left: Math.max(8, Math.min(rect.right - popupWidth, window.innerWidth - popupWidth - 8)),
+      left: Math.max(
+        8,
+        Math.min(rect.right - popupWidth, window.innerWidth - popupWidth - 8),
+      ),
       top:
         rect.top >= popupHeight + 8
           ? rect.top - popupHeight - 8
@@ -1077,6 +1297,92 @@ function Messages() {
     }
   };
 
+  const openGroupModal = async () => {
+    setGroupName("");
+    setGroupSearch("");
+    setGroupGradeFilter("All");
+    setIncludeSupportTeam(false);
+    setSelectedGroupMemberIds([]);
+    setGroupCandidates([]);
+    setGroupModalOpen(true);
+    setLoadingGroupCandidates(true);
+    setConversationError("");
+    try {
+      const candidates = await apiRequest(
+        "/school/group-conversation-candidates",
+        { headers: { Authorization: `****** || ""}` } },
+      );
+      if (!Array.isArray(candidates)) {
+        throw new Error("The school contacts response was invalid.");
+      }
+      setGroupCandidates(candidates);
+    } catch (error) {
+      setGroupModalOpen(false);
+      showErrorAlert(
+        error?.message || "Could not load school contacts. Please try again.",
+      );
+    } finally {
+      setLoadingGroupCandidates(false);
+    }
+  };
+
+  const toggleGroupMember = (memberId) => {
+    setSelectedGroupMemberIds((current) =>
+      current.includes(memberId)
+        ? current.filter((id) => id !== memberId)
+        : [...current, memberId],
+    );
+  };
+
+  const createGroupConversation = async (event) => {
+    event.preventDefault();
+    const memberUserIds = [...new Set(selectedGroupMemberIds)];
+    if (memberUserIds.length + (includeSupportTeam ? 1 : 0) < 2) return;
+
+    setCreatingGroup(true);
+    setConversationError("");
+    try {
+      const result = await apiRequest("/school/group-conversations", {
+        method: "POST",
+        headers: {
+          Authorization: `****** || ""}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          groupName: groupName.trim(),
+          memberUserIds,
+          includeSupportTeam,
+        }),
+      });
+      const refreshed = await loadConversations();
+      const conversation = refreshed?.find(
+        (item) => item.id === result?.conversation_id,
+      );
+      if (!conversation) {
+        throw new Error("The group was created but could not be loaded.");
+      }
+
+      setGroupModalOpen(false);
+      setGroupName("");
+      setGroupSearch("");
+      setGroupGradeFilter("All");
+      setIncludeSupportTeam(false);
+      setSelectedGroupMemberIds([]);
+      await openConversation(conversation);
+    } catch (error) {
+      const errorMessage =
+        error?.message === "SCHOOL_SUPPORT_MEMBER_UNAVAILABLE"
+          ? "No support team member is currently available. Try again later or create the group without support."
+          : error?.message === "SCHOOL_GROUP_CONVERSATION_FAILED"
+            ? "The group chat could not be created. Please try again. If the problem continues, contact support."
+            : error?.message ||
+              "Could not create the group chat. Please try again.";
+      showErrorAlert(errorMessage);
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
   const staffWithoutConversation = useMemo(() => {
     const currentUserId = auth.user?.id;
     const conversationParticipantIds = new Set(
@@ -1095,32 +1401,122 @@ function Messages() {
     });
   }, [auth.user?.id, conversations, staff]);
 
+  const filteredGroupCandidates = useMemo(() => {
+    const query = groupSearch.trim().toLowerCase();
+    return groupCandidates.filter((candidate) => {
+      const matchesSearch =
+        `${candidate.name} ${candidate.role} ${candidate.email || ""}`
+          .toLowerCase()
+          .includes(query);
+      const matchesGrade =
+        groupGradeFilter === "All" ||
+        !["client", "driver", "owner"].includes(candidate.role) ||
+        (candidate.grades || []).includes(groupGradeFilter);
+      return matchesSearch && matchesGrade;
+    });
+  }, [groupCandidates, groupGradeFilter, groupSearch]);
+
+  const groupGrades = useMemo(
+    () =>
+      [
+        ...new Set(
+          groupCandidates.flatMap((candidate) => candidate.grades || []),
+        ),
+      ].sort((first, second) =>
+        first.localeCompare(second, undefined, { numeric: true }),
+      ),
+    [groupCandidates],
+  );
+
+  const selectedGroupCount =
+    selectedGroupMemberIds.length + (includeSupportTeam ? 1 : 0);
+
+  const isSelectedSchoolGroup =
+    selectedConversation?.conversation_type === "school_group";
+  const removeDetailsParticipants = async () => {
+    if (
+      !selectedConversation?.can_manage_group ||
+      !detailsRemoveUserIds.length ||
+      detailsRemoveSaving
+    ) {
+      return;
+    }
+    setDetailsRemoveSaving(true);
+    setDetailsRemoveError("");
+    try {
+      await apiRequest(
+        `/school/group-conversations/${selectedConversation.id}/members`,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ memberUserIds: detailsRemoveUserIds }),
+        },
+      );
+      setDetailsRemoveMode(false);
+      setDetailsRemoveUserIds([]);
+      const refreshed = await loadConversations();
+      const updatedConversation = refreshed?.find(
+        (item) => String(item.id) === String(selectedConversation.id),
+      );
+      if (updatedConversation) {
+        selectedConversationIdRef.current = updatedConversation.id;
+        setSelectedConversation(updatedConversation);
+      }
+    } catch (error) {
+      console.error("Could not remove school group participants:", error);
+      setDetailsRemoveError(
+        error.message || "Could not remove selected participants.",
+      );
+    } finally {
+      setDetailsRemoveSaving(false);
+    }
+  };
+
+  const getParticipantReactions = (participantId) =>
+    messages
+      .flatMap((message) =>
+        (message.reactions || [])
+          .filter((reaction) =>
+            reaction.userIds?.some(
+              (userId) => String(userId) === String(participantId),
+            ),
+          )
+          .map((reaction) => ({
+            messageId: message.id,
+            emoji: reaction.emoji,
+            preview: getMessagePreview(message.content),
+            sentAt: message.sent_at,
+          })),
+      )
+      .slice(-3)
+      .reverse();
+
   return (
     <div className="messages-page">
-      <header className="messages-heading">
-        <div className="messages-title-wrap">
-          <span className="messages-title-icon">✉</span>
-          <div>
-            <h1>Messages</h1>
-            <p>Communicate with parents, drivers, and school staff.</p>
-          </div>
-        </div>
-        {/* <button
-          className="messages-new-button"
-          type="button"
-          onClick={() => {
-            selectedConversationIdRef.current = null;
-            setSelectedConversation(null);
-            setActiveTab("Staff");
-            void loadStaff();
-          }}
-        >
-          <FiPlus /> Message staff
-        </button> */}
-      </header>
+      <SchoolPageHeader
+        className="messages-heading"
+        eyebrow="Real-time communication"
+        titleIcon={
+          <span className="school-page-heading-icon">
+            <FiMessageSquare />
+          </span>
+        }
+        title="Messages"
+        description="Communicate with parents, drivers, and school staff."
+        actions={
+          <button
+            type="button"
+            className="messages-new-button"
+            onClick={() => void openGroupModal()}
+          >
+            <FiPlus />
+            New group chat
+          </button>
+        }
+        actionsClassName="messages-header-actions"
+      />
 
       <div
-        className={`messages-workspace ${selectedConversation ? "chat-open" : ""}`}
+        className={`messages-workspace ${selectedConversation ? "chat-open" : ""}${isSelectedSchoolGroup ? " has-group-details" : ""}${groupDetailsOpen ? " group-details-open" : ""}`}
       >
         <section className="conversation-panel">
           <div className="messages-tabs">
@@ -1159,6 +1555,9 @@ function Messages() {
                 {filteredConversations.map((conversation) => {
                   const participant = conversation.other_participant || {};
                   const participantName = getPersonName(participant);
+                  const participantAvatar = isSupportParticipant(participant)
+                    ? logo
+                    : participant.avatar;
                   const lastMessage = conversation.last_message || {};
                   const unreadCount = conversation.unread_count || 0;
                   return (
@@ -1167,10 +1566,24 @@ function Messages() {
                       key={conversation.id}
                       onClick={() => openConversation(conversation)}
                     >
+                      {/* {JSON.stringify(participant)} */}
                       <span
                         className={`conversation-avatar ${participant.role || "staff"}`}
                       >
                         {getInitials(participantName)}
+                        {participantAvatar && (
+                          <img
+                            src={participantAvatar}
+                            alt=""
+                            aria-hidden="true"
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                        )}
+                        {participant.role !== "group" ? (
+                          <PresenceDot userId={participant.id} />
+                        ) : null}
                       </span>
                       <span className="conversation-copy">
                         <span className="conversation-topline">
@@ -1231,27 +1644,60 @@ function Messages() {
           {selectedConversation ? (
             <>
               <header className="chat-panel-header">
-                <button
-                  className="mobile-chat-back"
-                  onClick={() => {
-                    selectedConversationIdRef.current = null;
-                    setSelectedConversation(null);
-                  }}
-                >
-                  <FiArrowLeft />
-                </button>
                 <span className="chat-avatar">
                   {getInitials(
                     getPersonName(selectedConversation.other_participant),
                   )}
+                  {(isSupportParticipant(selectedConversation.other_participant)
+                    ? logo
+                    : selectedConversation.other_participant?.avatar) && (
+                    <img
+                      src={
+                        isSupportParticipant(
+                          selectedConversation.other_participant,
+                        )
+                          ? logo
+                          : selectedConversation.other_participant.avatar
+                      }
+                      alt=""
+                      aria-hidden="true"
+                      onError={(event) => {
+                        event.currentTarget.style.display = "none";
+                      }}
+                    />
+                  )}
+                  {selectedConversation.other_participant?.role !== "group" ? (
+                    <PresenceDot
+                      userId={selectedConversation.other_participant?.id}
+                    />
+                  ) : null}
                 </span>
-                <div>
+                <div className="chat-participant">
                   <h2>
                     {getPersonName(selectedConversation.other_participant)}
                   </h2>
-                  <p>{getRoleLabel(selectedConversation.other_participant)}</p>
+                  <p>
+                    {getRoleLabel(selectedConversation.other_participant)}
+                    {selectedConversation.other_participant?.role !==
+                    "group" ? (
+                      <PresenceStatus
+                        userId={selectedConversation.other_participant?.id}
+                      />
+                    ) : null}
+                  </p>
                 </div>
                 <div className="chat-actions">
+                  {isSelectedSchoolGroup && (
+                    <button
+                      type="button"
+                      className="group-details-toggle"
+                      aria-label="Group details"
+                      aria-expanded={groupDetailsOpen}
+                      onClick={() => setGroupDetailsOpen((open) => !open)}
+                    >
+                      <FiInfo />
+                    </button>
+                  )}
                   <button aria-label="Call">
                     <FiPhone />
                   </button>
@@ -1293,120 +1739,177 @@ function Messages() {
                 ) : messages.length ? (
                   messages.map((message) => {
                     const own = message.sender_id === auth.user?.id;
+                    const isGroupChat = [
+                      "admin_group",
+                      "school_group",
+                    ].includes(selectedConversation.conversation_type);
+                    const messageUser = Array.isArray(message.users)
+                      ? message.users[0]
+                      : message.users;
+                    const senderParticipant =
+                      selectedConversation.participants?.find(
+                        (participant) =>
+                          String(participant.id) === String(message.sender_id),
+                      );
+                    const senderAvatar =
+                      messageUser?.avatar || senderParticipant?.avatar;
+                    const senderName =
+                      messageUser?.name ||
+                      senderParticipant?.name ||
+                      "Participant";
                     return (
                       <div
                         className={`message-bubble-row ${own ? "own" : ""}`}
                         key={message.id}
                       >
-                        <div className={`message-bubble ${own ? "own" : ""}`}>
-                          {(() => {
-                            const attachment = parseMessageAttachment(
-                              message.content,
-                            );
-                            if (!attachment) {
-                              return <p>{message.content}</p>;
-                            }
-                            return (
-                              <div className="message-attachment">
-                                <div className="message-attachment-group">
-                                  {attachment.attachments.map((item, index) => {
-                                    if (item.mediaType === "image") {
-                                      const imageItems =
-                                        attachment.attachments.filter(
-                                          (entry) =>
-                                            entry.mediaType === "image",
-                                        );
-                                      const imageIndex =
-                                        imageItems.indexOf(item);
-                                      return (
-                                        <button
-                                          type="button"
-                                          className="message-attachment-preview-trigger"
-                                          aria-label={`Preview image ${item.name}`}
-                                          onClick={() =>
-                                            setAttachmentPreview({
-                                              items: imageItems,
-                                              index: imageIndex,
-                                            })
-                                          }
-                                          key={`${item.url}-${index}`}
-                                        >
-                                          <img
-                                            className="message-attachment-image"
-                                            src={item.url}
-                                            alt={item.name}
-                                            loading="lazy"
-                                            referrerPolicy="no-referrer"
-                                          />
-                                        </button>
-                                      );
-                                    }
-                                    if (item.mediaType === "audio") {
-                                      return (
-                                        <audio
-                                          className="message-attachment-audio"
-                                          controls
-                                          preload="metadata"
-                                          src={item.url}
-                                          aria-label={item.name}
-                                          key={`${item.url}-${index}`}
-                                        />
-                                      );
-                                    }
-                                    return (
-                                      <button
-                                        type="button"
-                                        className="message-attachment-file"
-                                        onClick={() =>
-                                          setAttachmentPreview({
-                                            items: [item],
-                                            index: 0,
-                                          })
+                        {!own && isGroupChat ? (
+                          <span className="message-sender-avatar">
+                            {senderAvatar ? (
+                              <img
+                                src={senderAvatar}
+                                alt=""
+                                aria-hidden="true"
+                                onError={(event) => {
+                                  event.currentTarget.style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              getInitials(senderName)
+                            )}
+                            <PresenceDot userId={message.sender_id} />
+                          </span>
+                        ) : null}
+                        <div className="message-content-wrap">
+                          <div className={`message-bubble ${own ? "own" : ""}`}>
+                            {(() => {
+                              const attachment = parseMessageAttachment(
+                                message.content,
+                              );
+                              if (!attachment) {
+                                return <p>{message.content}</p>;
+                              }
+                              return (
+                                <div className="message-attachment">
+                                  <div className="message-attachment-group">
+                                    {attachment.attachments.map(
+                                      (item, index) => {
+                                        if (item.mediaType === "image") {
+                                          const imageItems =
+                                            attachment.attachments.filter(
+                                              (entry) =>
+                                                entry.mediaType === "image",
+                                            );
+                                          const imageIndex =
+                                            imageItems.indexOf(item);
+                                          return (
+                                            <button
+                                              type="button"
+                                              className="message-attachment-preview-trigger"
+                                              aria-label={`Preview image ${item.name}`}
+                                              onClick={() =>
+                                                setAttachmentPreview({
+                                                  items: imageItems,
+                                                  index: imageIndex,
+                                                })
+                                              }
+                                              key={`${item.url}-${index}`}
+                                            >
+                                              <img
+                                                className="message-attachment-image"
+                                                src={item.url}
+                                                alt={item.name}
+                                                loading="lazy"
+                                                referrerPolicy="no-referrer"
+                                              />
+                                            </button>
+                                          );
                                         }
-                                        key={`${item.url}-${index}`}
-                                      >
-                                        <FiPaperclip />
-                                        <span>{item.name}</span>
-                                      </button>
-                                    );
-                                  })}
+                                        if (item.mediaType === "audio") {
+                                          return (
+                                            <MessageAudioAttachment
+                                              item={item}
+                                              key={`${item.url}-${index}`}
+                                            />
+                                          );
+                                        }
+                                        if (item.mediaType === "video") {
+                                          return (
+                                            <video
+                                              className="message-attachment-video"
+                                              src={item.url}
+                                              controls
+                                              preload="metadata"
+                                              aria-label={
+                                                item.name || "Video attachment"
+                                              }
+                                              key={`${item.url}-${index}`}
+                                            />
+                                          );
+                                        }
+                                        return (
+                                          <button
+                                            type="button"
+                                            className="message-attachment-file"
+                                            onClick={() =>
+                                              setAttachmentPreview({
+                                                items: [item],
+                                                index: 0,
+                                              })
+                                            }
+                                            key={`${item.url}-${index}`}
+                                          >
+                                            <FiPaperclip />
+                                            <span>{item.name}</span>
+                                          </button>
+                                        );
+                                      },
+                                    )}
+                                  </div>
+                                  {attachment.caption && (
+                                    <p className="message-attachment-caption">
+                                      {attachment.caption}
+                                    </p>
+                                  )}
                                 </div>
-                                {attachment.caption && (
-                                  <p className="message-attachment-caption">
-                                    {attachment.caption}
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })()}
-                          <div className={`message-footer${own ? " own" : ""}`}>
-                            {/* Show reaction badges for both own and other messages next to the timestamp */}
-                            {message.reactions?.length > 0 && (
-                              <span
-                                className="message-reaction-badges"
-                                aria-label={own ? "Reactions to your message" : "Reactions to message"}
-                              >
-                                {message.reactions.map((reaction) => (
-                                  <span key={reaction.emoji}>
-                                    {reaction.emoji}
+                              );
+                            })()}
+                            <div
+                              className={`message-footer${own ? " own" : ""}`}
+                            >
+                              <time>
+                                {formatTime(message.sent_at)}
+                                {own && !message.deliveryError && (
+                                  <span
+                                    className={`message-read-tick${message.is_read ? " is-read" : ""}`}
+                                    aria-label={
+                                      message.is_read ? "Read" : "Sent"
+                                    }
+                                    title={message.is_read ? "Read" : "Sent"}
+                                  >
+                                    {message.is_read ? "✓✓" : "✓"}
                                   </span>
-                                ))}
+                                )}
+                              </time>
+                            </div>
+                            {message.deliveryError && (
+                              <span className="message-delivery-error">
+                                Message not sent
                               </span>
                             )}
-                            <time>
-                              {formatTime(message.sent_at)}
-                              {own && !message.deliveryError && (
-                                <span
-                                  className={`message-read-tick${message.is_read ? " is-read" : ""}`}
-                                  aria-label={message.is_read ? "Read" : "Sent"}
-                                  title={message.is_read ? "Read" : "Sent"}
-                                >
-                                  {message.is_read ? "✓✓" : "✓"}
-                                </span>
-                              )}
-                            </time>
-                            {!own && (
-                              <div className="message-reactions">
+                            <div className="message-reactions">
+                              <div
+                                className="message-reaction-list"
+                                ref={(element) => {
+                                  if (element) {
+                                    reactionListRefs.current.set(
+                                      message.id,
+                                      element,
+                                    );
+                                  } else {
+                                    reactionListRefs.current.delete(message.id);
+                                  }
+                                }}
+                              >
                                 {message.reactions?.map((reaction) => {
                                   const selected =
                                     reaction.userIds?.includes(auth.user?.id) ||
@@ -1416,76 +1919,69 @@ function Messages() {
                                       type="button"
                                       key={reaction.emoji}
                                       className={`message-reaction-chip${selected ? " selected" : ""}`}
-                                      onClick={() =>
-                                        void toggleMessageReaction(
-                                          message,
-                                          reaction.emoji,
-                                        )
-                                      }
-                                      aria-label={`${reaction.emoji} reaction`}
+                                      disabled={own}
+                                      onClick={() => {
+                                        if (!own) {
+                                          void toggleMessageReaction(
+                                            message,
+                                            reaction.emoji,
+                                          );
+                                        }
+                                      }}
+                                      aria-label={`${reaction.count} ${reaction.emoji} reaction${reaction.count === 1 ? "" : "s"}`}
                                       aria-pressed={Boolean(selected)}
                                     >
                                       <span>{reaction.emoji}</span>
+                                      <small>{reaction.count}</small>
                                     </button>
                                   );
                                 })}
-                                {reactionPickerMessageId === message.id && (
-                                  createPortal(
-                                    <div
-                                      className="message-reaction-picker"
-                                      style={reactionPickerPosition}
-                                    >
-                                      {QUICK_MESSAGE_REACTIONS.map((emoji) => (
-                                        <button
-                                          type="button"
-                                          key={emoji}
-                                          onClick={() =>
-                                            void toggleMessageReaction(message, emoji)
-                                          }
-                                          aria-label={`React with ${emoji}`}
-                                        >
-                                          {emoji}
-                                        </button>
-                                      ))}
-                                    </div>,
-                                    document.body,
-                                  )
-                                )}
-                                {!String(message.id).startsWith("optimistic-") && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      className={`message-reaction-like${message.reactions?.some((reaction) => reaction.emoji === "❤️" && (reaction.userIds?.includes(auth.user?.id) || reaction.reactedByMe)) ? " selected" : ""}`}
-                                      onClick={() =>
-                                        void toggleMessageReaction(message, "❤️")
-                                      }
-                                      aria-label="Like message"
-                                    >
-                                      <FiHeart />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="message-reaction-add"
-                                      onClick={(event) =>
-                                        toggleReactionPicker(message.id, event)
-                                      }
-                                      aria-label="Add reaction"
-                                      aria-expanded={
-                                        reactionPickerMessageId === message.id
-                                      }
-                                    >
-                                      <FiSmile />
-                                    </button>
-                                  </>
-                                )}
                               </div>
-                            )}
+                              {!own &&
+                                reactionPickerMessageId === message.id &&
+                                createPortal(
+                                  <div
+                                    className="message-reaction-picker"
+                                    style={reactionPickerPosition}
+                                  >
+                                    {QUICK_MESSAGE_REACTIONS.map((emoji) => (
+                                      <button
+                                        type="button"
+                                        key={emoji}
+                                        onClick={() =>
+                                          void toggleMessageReaction(
+                                            message,
+                                            emoji,
+                                          )
+                                        }
+                                        aria-label={`React with ${emoji}`}
+                                      >
+                                        {emoji}
+                                      </button>
+                                    ))}
+                                  </div>,
+                                  document.body,
+                                )}
+                              {!own &&
+                                !String(message.id).startsWith(
+                                  "optimistic-",
+                                ) && (
+                                  <button
+                                    type="button"
+                                    className="message-reaction-add"
+                                    onClick={(event) =>
+                                      toggleReactionPicker(message.id, event)
+                                    }
+                                    aria-label="Add reaction"
+                                    aria-expanded={
+                                      reactionPickerMessageId === message.id
+                                    }
+                                  >
+                                    <FiPlus />
+                                  </button>
+                                )}
+                            </div>
                           </div>
-                          {message.deliveryError && (
-                            <span className="message-delivery-error">
-                              Message not sent
-                            </span>
-                          )}
                         </div>
                       </div>
                     );
@@ -1501,7 +1997,7 @@ function Messages() {
                   ref={fileInputRef}
                   className="message-file-input"
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,audio/mp4,audio/m4a,audio/mpeg,audio/aac,audio/wav,audio/x-wav,audio/webm,audio/3gpp"
+                  accept={attachmentAccept}
                   multiple
                   onChange={(event) => {
                     stageAttachments(Array.from(event.target.files || []));
@@ -1523,6 +2019,13 @@ function Messages() {
                               src={attachmentPreviewUrls[index]}
                               alt=""
                               className="message-composer-attachment-image"
+                            />
+                          ) : mediaType === "video" ? (
+                            <video
+                              className="message-composer-attachment-video"
+                              src={attachmentPreviewUrls[index]}
+                              muted
+                              preload="metadata"
                             />
                           ) : (
                             <span className="message-composer-attachment-icon">
@@ -1647,11 +2150,37 @@ function Messages() {
                   <button
                     type="button"
                     aria-label="Attach files"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => setAttachmentPickerOpen((open) => !open)}
                     disabled={sending || recording}
                   >
                     <FiPaperclip />
                   </button>
+                  {attachmentPickerOpen && (
+                    <div className="message-attachment-picker" role="menu">
+                      {[
+                        ["Images", "image/*"],
+                        ["Videos", "video/*"],
+                        ["Images & videos", "image/*,video/*"],
+                        ["Files", "application/pdf,audio/*"],
+                      ].map(([label, accept]) => (
+                        <button
+                          key={label}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setAttachmentAccept(accept);
+                            setAttachmentPickerOpen(false);
+                            if (fileInputRef.current) {
+                              fileInputRef.current.accept = accept;
+                              fileInputRef.current.click();
+                            }
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <button
                     ref={emojiButtonRef}
                     type="button"
@@ -1715,11 +2244,324 @@ function Messages() {
             <div className="chat-placeholder">
               <span>✉</span>
               <h2>Select a conversation</h2>
-              <p>Choose a parent, driver, or staff member to view messages.</p>
+              <p>Choose a contact or group to view messages.</p>
             </div>
           )}
         </section>
+        {isSelectedSchoolGroup && (
+          <aside className="school-group-details" aria-label="Group details">
+            <div className="school-group-details-heading">
+              <div>
+                <small>GROUP CHAT</small>
+                <h2>Details</h2>
+              </div>
+              <span className="school-group-member-count">
+                {selectedConversation.participants?.length || 0} members
+              </span>
+              <button
+                type="button"
+                aria-label="Close group details"
+                onClick={() => setGroupDetailsOpen(false)}
+              >
+                <FiX />
+              </button>
+            </div>
+            <section className="school-group-participants">
+              <div className="school-group-details-section-heading">
+                <div>
+                  <h3>Participants</h3>
+                  <small>
+                    {selectedConversation.participants?.length || 0} people
+                  </small>
+                </div>
+                {selectedConversation.can_manage_group &&
+                  (detailsRemoveMode ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDetailsRemoveMode(false);
+                        setDetailsRemoveUserIds([]);
+                        setDetailsRemoveError("");
+                      }}
+                      disabled={detailsRemoveSaving}
+                    >
+                      Cancel
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="school-group-remove-link"
+                      onClick={() => {
+                        setDetailsRemoveMode(true);
+                        setDetailsRemoveUserIds([]);
+                        setDetailsRemoveError("");
+                      }}
+                    >
+                      Remove
+                    </button>
+                  ))}
+              </div>
+              {detailsRemoveError && (
+                <p className="school-group-details-error" role="alert">
+                  {detailsRemoveError}
+                </p>
+              )}
+              <div className="school-group-participant-list">
+                {[...(selectedConversation.participants || [])]
+                  .sort((first, second) => {
+                    const currentUserId = String(auth.user?.id || "");
+                    const firstIsCurrentUser =
+                      String(first.id) === currentUserId;
+                    const secondIsCurrentUser =
+                      String(second.id) === currentUserId;
+                    return (
+                      Number(secondIsCurrentUser) - Number(firstIsCurrentUser)
+                    );
+                  })
+                  .map((participant) => {
+                    const isCurrentUser =
+                      String(participant.id) === String(auth.user?.id || "");
+                    const canRemove =
+                      participant.role !== "admin" && !isCurrentUser;
+                    const participantReactions = getParticipantReactions(
+                      participant.id,
+                    );
+                    return (
+                      <div
+                        className="school-group-participant"
+                        key={participant.id}
+                      >
+                        {detailsRemoveMode &&
+                          selectedConversation.can_manage_group &&
+                          canRemove && (
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${participant.name || "participant"} for removal`}
+                              checked={detailsRemoveUserIds.includes(
+                                String(participant.id),
+                              )}
+                              disabled={detailsRemoveSaving}
+                              onChange={(event) =>
+                                setDetailsRemoveUserIds((current) =>
+                                  event.target.checked
+                                    ? [...current, String(participant.id)]
+                                    : current.filter(
+                                        (id) => id !== String(participant.id),
+                                      ),
+                                )
+                              }
+                            />
+                          )}
+                        <span className="school-group-participant-avatar">
+                          {getInitials(participant.name || participant.email)}
+                          {participant.avatar && (
+                            <img
+                              src={participant.avatar}
+                              alt=""
+                              aria-hidden="true"
+                            />
+                          )}
+                          <PresenceDot userId={participant.id} />
+                        </span>
+                        <div className="school-group-participant-copy">
+                          <div className="school-group-participant-name">
+                            <strong>
+                              {participant.name ||
+                                participant.email ||
+                                "Participant"}
+                            </strong>
+                            {isCurrentUser && (
+                              <span className="school-group-you-badge">
+                                You
+                              </span>
+                            )}
+                          </div>
+                          <small>
+                            {getRoleLabel(participant)}
+                            {participant.email ? ` · ${participant.email}` : ""}
+                          </small>
+                          <PresenceStatus userId={participant.id} />
+                          {participantReactions.map((reaction) => (
+                            <span
+                              className="school-group-participant-reaction"
+                              key={`${participant.id}-${reaction.messageId}-${reaction.emoji}`}
+                              title={reaction.sentAt || ""}
+                            >
+                              <span>{reaction.emoji}</span>
+                              <span>
+                                Reacted to: {reaction.preview || "a message"}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                {!selectedConversation.participants?.length && (
+                  <p className="messages-empty">
+                    No participants are available.
+                  </p>
+                )}
+              </div>
+              {selectedConversation.can_manage_group && detailsRemoveMode && (
+                <button
+                  type="button"
+                  className="school-group-remove-selected"
+                  onClick={() => void removeDetailsParticipants()}
+                  disabled={
+                    detailsRemoveSaving || detailsRemoveUserIds.length === 0
+                  }
+                >
+                  {detailsRemoveSaving
+                    ? "Removing..."
+                    : `Remove selected${detailsRemoveUserIds.length ? ` (${detailsRemoveUserIds.length})` : ""}`}
+                </button>
+              )}
+            </section>
+          </aside>
+        )}
       </div>
+      {groupModalOpen &&
+        createPortal(
+          <div
+            className="school-group-modal-backdrop"
+            role="presentation"
+            onClick={() => {
+              if (!creatingGroup) setGroupModalOpen(false);
+            }}
+          >
+            <form
+              className="school-group-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="school-group-modal-title"
+              onSubmit={createGroupConversation}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="school-group-modal-heading">
+                <div>
+                  <h2 id="school-group-modal-title">Create a group chat</h2>
+                  <p>Choose at least two people from your school network.</p>
+                </div>
+                <button
+                  type="button"
+                  className="school-group-modal-close"
+                  onClick={() => setGroupModalOpen(false)}
+                  disabled={creatingGroup}
+                  aria-label="Close group chat form"
+                >
+                  <FiX />
+                </button>
+              </div>
+              <label className="school-group-field">
+                <span>Group name</span>
+                <input
+                  value={groupName}
+                  onChange={(event) => setGroupName(event.target.value)}
+                  maxLength={80}
+                  placeholder="For example, Grade 4 parents"
+                />
+              </label>
+              <label className="school-group-field">
+                <span>Find people</span>
+                <input
+                  value={groupSearch}
+                  onChange={(event) => setGroupSearch(event.target.value)}
+                  placeholder="Search name, role, or email"
+                />
+              </label>
+              <label className="school-group-field">
+                <span>Show by grade</span>
+                <select
+                  value={groupGradeFilter}
+                  onChange={(event) => setGroupGradeFilter(event.target.value)}
+                >
+                  <option value="All">All grades</option>
+                  {groupGrades.map((grade) => (
+                    <option key={grade} value={grade}>
+                      {grade}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="school-group-support">
+                <input
+                  type="checkbox"
+                  checked={includeSupportTeam}
+                  disabled={creatingGroup}
+                  onChange={(event) =>
+                    setIncludeSupportTeam(event.target.checked)
+                  }
+                />
+                <span>
+                  <strong>Include one support team member</strong>
+                  <small>
+                    We’ll automatically add an available support team member.
+                  </small>
+                </span>
+              </label>
+              <div className="school-group-candidates">
+                {loadingGroupCandidates ? (
+                  <p className="messages-empty">Loading school contacts...</p>
+                ) : filteredGroupCandidates.length ? (
+                  filteredGroupCandidates.map((candidate) => {
+                    const selected = selectedGroupMemberIds.includes(
+                      candidate.id,
+                    );
+                    return (
+                      <label
+                        className="school-group-candidate"
+                        key={candidate.id}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleGroupMember(candidate.id)}
+                        />
+                        <span className="school-group-candidate-avatar">
+                          {getInitials(candidate.name)}
+                        </span>
+                        <span className="school-group-candidate-copy">
+                          <strong>{candidate.name}</strong>
+                          <small>
+                            {candidate.role || "Contact"}
+                            {candidate.email ? ` · ${candidate.email}` : ""}
+                          </small>
+                        </span>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <p className="messages-empty">
+                    No linked school contacts match your search.
+                  </p>
+                )}
+              </div>
+              <div className="school-group-modal-footer">
+                <span>
+                  {selectedGroupCount} selected
+                  {selectedGroupCount < 2 && " · Select at least two"}
+                </span>
+                <button
+                  type="button"
+                  className="school-group-cancel"
+                  onClick={() => setGroupModalOpen(false)}
+                  disabled={creatingGroup}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="school-group-create"
+                  disabled={creatingGroup || selectedGroupCount < 2}
+                >
+                  {creatingGroup ? "Creating..." : "Create group"}
+                </button>
+              </div>
+            </form>
+          </div>,
+          document.body,
+        )}
       {attachmentPreview && activePreviewAttachment && (
         <div
           className="school-attachment-modal-backdrop"

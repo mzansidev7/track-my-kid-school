@@ -12,6 +12,7 @@ import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
 import { useSearchParams } from "react-router-dom";
 import "../styles/support-tickets.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 const categories = [
   ["technical", "Technical issue"],
@@ -55,6 +56,15 @@ const getCachedTickets = (key) => {
   }
 };
 
+const getCachedReplies = (key) => {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "null")?.data;
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+};
+
 export default function SupportTickets() {
   const [searchParams] = useSearchParams();
   const requestedTicketId = searchParams.get("ticket") || "";
@@ -66,6 +76,7 @@ export default function SupportTickets() {
   }
   const userId = session.user?.id;
   const cacheKey = `schoolSupportTickets:${userId || "current"}`;
+  const repliesCachePrefix = `schoolSupportTicketReplies:${userId || "current"}:`;
   const headers = useMemo(
     () => ({ Authorization: `Bearer ${session.token || ""}` }),
     [session.token],
@@ -74,7 +85,13 @@ export default function SupportTickets() {
   const [selectedId, setSelectedId] = useState(
     () => requestedTicketId || getCachedTickets(cacheKey)[0]?.id || "",
   );
-  const [replies, setReplies] = useState([]);
+  const [replies, setReplies] = useState(() => {
+    const initialTicketId =
+      requestedTicketId || getCachedTickets(cacheKey)[0]?.id || "";
+    return initialTicketId
+      ? getCachedReplies(`${repliesCachePrefix}${initialTicketId}`)
+      : [];
+  });
   const [filter, setFilter] = useState("All");
   const [loading, setLoading] = useState(() => getCachedTickets(cacheKey).length === 0);
   const [submitting, setSubmitting] = useState(false);
@@ -124,28 +141,33 @@ export default function SupportTickets() {
       setReplies([]);
       return;
     }
+    const ticketRepliesCacheKey = `${repliesCachePrefix}${ticketId}`;
+    const cachedReplies = getCachedReplies(ticketRepliesCacheKey);
+    setReplies(cachedReplies);
     try {
       const data = await apiRequest(
         `/school/support-tickets/${encodeURIComponent(ticketId)}/replies`,
         { headers },
       );
-      setReplies(Array.isArray(data) ? data : []);
+      const next = Array.isArray(data) ? data : [];
+      setReplies(next);
+      localStorage.setItem(
+        ticketRepliesCacheKey,
+        JSON.stringify({ data: next, timestamp: Date.now() }),
+      );
       setError("");
     } catch (requestError) {
-      setReplies([]);
       setError(requestError.message || "Unable to load this conversation.");
     }
-  }, [headers]);
+  }, [headers, repliesCachePrefix]);
 
   useEffect(() => {
     // Sync the ticket list with the server when this page is opened.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadTickets();
-    const interval = window.setInterval(loadTickets, 30000);
     const onFocus = () => loadTickets();
     window.addEventListener("focus", onFocus);
     return () => {
-      window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
   }, [loadTickets]);
@@ -158,19 +180,40 @@ export default function SupportTickets() {
 
   useEffect(() => {
     if (!supabaseClient || !userId) return undefined;
+    let refreshTimeout;
+    const scheduleRefresh = () => {
+      window.clearTimeout(refreshTimeout);
+      refreshTimeout = window.setTimeout(() => {
+        void loadTickets();
+        if (selectedId) void loadReplies(selectedId);
+      }, 200);
+    };
     const channel = supabaseClient
       .channel(`school-support-ticket-updates:${userId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "support_dashboard_events" },
-        () => {
-          loadTickets();
-          if (selectedId) loadReplies(selectedId);
+        {
+          event: "*",
+          schema: "public",
+          table: "support_dashboard_events",
+          filter: "resource_type=eq.support_tickets",
         },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "support_dashboard_events",
+          filter: "resource_type=eq.support_ticket_replies",
+        },
+        scheduleRefresh,
       )
       .subscribe();
     return () => {
-      supabaseClient.removeChannel(channel);
+      window.clearTimeout(refreshTimeout);
+      void supabaseClient.removeChannel(channel);
     };
   }, [loadReplies, loadTickets, selectedId, userId]);
 
@@ -190,6 +233,10 @@ export default function SupportTickets() {
       localStorage.setItem(cacheKey, JSON.stringify({ data: next, timestamp: Date.now() }));
       setSelectedId(ticket.id);
       setReplies([]);
+      localStorage.setItem(
+        `${repliesCachePrefix}${ticket.id}`,
+        JSON.stringify({ data: [], timestamp: Date.now() }),
+      );
       setForm({ subject: "", category: "technical", priority: "medium", message: "" });
       setShowForm(false);
       setNotice("Your request has been sent. Support will respond here.");
@@ -226,25 +273,27 @@ export default function SupportTickets() {
 
   return (
     <main className="school-support-page">
-      <header className="school-support-header">
-        <div>
-          <div className="school-support-eyebrow">HELP CENTRE</div>
-          <h1>Support</h1>
-          <p>Get help from our team and follow every request in one place.</p>
-        </div>
-        <button
-          className="school-support-primary"
-          onClick={() => {
-            setShowForm((value) => !value);
-            setNotice("");
-            setError("");
-          }}
-          type="button"
-        >
-          {showForm ? <FiArrowLeft /> : <FiPlus />}
-          {showForm ? "Back to tickets" : "New request"}
-        </button>
-      </header>
+      <SchoolPageHeader
+        className="school-support-header"
+        eyebrow="HELP CENTRE"
+        titleIcon={<span className="school-page-heading-icon"><FiLifeBuoy /></span>}
+        title="Support"
+        description="Get help from our team and follow every request in one place."
+        actions={
+          <button
+            className="school-support-primary"
+            onClick={() => {
+              setShowForm((value) => !value);
+              setNotice("");
+              setError("");
+            }}
+            type="button"
+          >
+            {showForm ? <FiArrowLeft /> : <FiPlus />}
+            {showForm ? "Back to tickets" : "New request"}
+          </button>
+        }
+      />
 
       {error && <div className="school-support-alert error">{error}</div>}
       {notice && <div className="school-support-alert success">{notice}</div>}
@@ -409,7 +458,9 @@ export default function SupportTickets() {
                   )}
                 </div>
                 {resolvedStatuses.includes(selected.status) ? (
-                  <div className="school-support-closed">This request is closed. Contact support to open a new request.</div>
+                  <div className="school-support-closed">
+                    Ticket #{selected.id} is closed and will be automatically removed 48 hours after closing. Contact support to open a new request.
+                  </div>
                 ) : (
                   <form className="school-support-reply-form" onSubmit={sendReply}>
                     <textarea

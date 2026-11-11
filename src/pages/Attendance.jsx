@@ -8,11 +8,13 @@ import {
   FiCheckCircle,
   FiClock,
   FiDownload,
+  FiLoader,
   FiSearch,
   FiUsers,
   FiX,
 } from "react-icons/fi";
 import "../styles/attendance.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 import { useAttendance } from "../hooks/useAttendance";
 import {
   downloadSchoolReport,
@@ -35,11 +37,15 @@ function Attendance() {
   );
   const [selectedGrade, setSelectedGrade] = useState("All grades");
   const [attendanceNotice, setAttendanceNotice] = useState("");
+  const [markingAttendance, setMarkingAttendance] = useState(false);
   const {
     students: attendanceStudents,
     loading,
     overviewDays,
+    overviewLoading,
+    overviewError,
     setStatus: saveStatus,
+    reload,
   } = useAttendance(selectedDate);
   const students = useMemo(
     () =>
@@ -116,7 +122,34 @@ function Attendance() {
       students.filter((student) => student.status === "Not recorded").length,
     [students],
   );
-  const isToday = selectedDate === formatLocalDate(new Date());
+  const filteredUnmarkedCount = useMemo(
+    () =>
+      filteredStudents.filter((student) => student.status === "Not recorded")
+        .length,
+    [filteredStudents],
+  );
+  const pendingWeekdays = useMemo(() => {
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const todayDate = formatLocalDate(today);
+    const monday = new Date(today);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    return Array.from({ length: 5 }, (_, index) => {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + index);
+      return formatLocalDate(date);
+    })
+      .filter((date) => date <= todayDate)
+      .map((date) => {
+        const day = overviewDays.find(
+          (overviewDay) => overviewDay.date === date,
+        );
+        return day && day.total > 0 && day.recorded < day.total
+          ? { ...day, unmarked: day.total - day.recorded }
+          : null;
+      })
+      .filter(Boolean);
+  }, [overviewDays]);
   const attendanceSummary = useMemo(() => {
     const present = filteredStudents.filter(
       (student) => student.status === "Present",
@@ -231,25 +264,42 @@ function Attendance() {
   }, [selectedOverviewDays]);
 
   const markFilteredAttendance = async () => {
+    if (markingAttendance || loading || filteredUnmarkedCount === 0) return;
     const unmarkedStudents = filteredStudents.filter(
       (student) => student.status === "Not recorded",
     );
-    await Promise.all(
-      unmarkedStudents.map((student) => setStatus(student, "Present")),
-    );
-    setCurrentPage(1);
-    setAttendanceNotice(
-      unmarkedStudents.length
-        ? `${unmarkedStudents.length} student${unmarkedStudents.length === 1 ? "" : "s"} marked present for ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString()}.`
-        : "All filtered students already have attendance marked.",
-    );
-    window.setTimeout(() => setAttendanceNotice(""), 4000);
+    setMarkingAttendance(true);
+    setAttendanceNotice("");
+    try {
+      const results = await Promise.allSettled(
+        unmarkedStudents.map((student) => setStatus(student, "Present")),
+      );
+      const failedCount = results.filter(
+        (result) => result.status === "rejected",
+      ).length;
+      await reload();
+      setCurrentPage(1);
+      setAttendanceNotice(
+        failedCount
+          ? `Could not mark attendance for ${failedCount} student${failedCount === 1 ? "" : "s"}. Please review the register and try again.`
+          : `${unmarkedStudents.length} student${unmarkedStudents.length === 1 ? "" : "s"} marked present for ${new Date(`${selectedDate}T12:00:00`).toLocaleDateString()}.`,
+      );
+    } catch (error) {
+      console.error("Could not mark filtered attendance:", error);
+      setAttendanceNotice(
+        "Could not mark attendance. Please review the register and try again.",
+      );
+    } finally {
+      setMarkingAttendance(false);
+      window.setTimeout(() => setAttendanceNotice(""), 5000);
+    }
   };
 
-  const reviewUnmarkedAttendance = () => {
+  const reviewUnmarkedAttendance = (date = selectedDate) => {
     setQuery("");
     setSelectedGrade("All grades");
     setCurrentPage(1);
+    setSelectedDate(date);
   };
 
   const exportReport = () => {
@@ -325,42 +375,74 @@ function Attendance() {
   return (
     <>
       <div className="portal-content attendance-content">
-        <section className="attendance-heading">
-          <div>
-            <p className="page-kicker">DAILY REGISTER</p>
-            <h1>Attendance</h1>
-            <p>
-              Track student attendance and keep your school register up to date.
-            </p>
-          </div>
-          <div className="attendance-actions">
+        <SchoolPageHeader
+          className="attendance-heading"
+          actionsClassName="attendance-actions"
+          eyebrow="DAILY REGISTER"
+          titleIcon={<span className="school-page-heading-icon"><FiCalendar /></span>}
+          title="Attendance"
+          description="Track student attendance and keep your school register up to date."
+          actions={
+            <>
             <button className="attendance-secondary" onClick={exportReport}>
               <FiDownload /> Export report
             </button>
             <button
               className="attendance-primary"
               onClick={markFilteredAttendance}
-              disabled={loading || !filteredStudents.length}
+              disabled={
+                loading ||
+                markingAttendance ||
+                unmarkedCount === 0 ||
+                filteredUnmarkedCount === 0
+              }
             >
-              <FiCheckCircle /> Mark attendance
+              {markingAttendance ? (
+                <>
+                  <FiLoader className="attendance-button-spinner" />
+                  Marking...
+                </>
+              ) : (
+                <>
+                  <FiCheckCircle /> Mark attendance
+                </>
+              )}
             </button>
-          </div>
-        </section>
-        {!loading && isToday && unmarkedCount > 0 && (
+            </>
+          }
+        />
+        {!overviewLoading && pendingWeekdays.length > 0 && (
           <section className="attendance-reminder" role="status">
             <FiAlertCircle aria-hidden="true" />
             <div>
-              <strong>Reminder: mark today's attendance</strong>
+              <strong>Reminder: mark attendance for this week</strong>
               <p>
-                {unmarkedCount} student
-                {unmarkedCount === 1 ? " still needs" : "s still need"} a
-                recorded attendance status.
+                {pendingWeekdays
+                  .map((day) => {
+                    const label = new Date(
+                      `${day.date}T12:00:00`,
+                    ).toLocaleDateString([], {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                    });
+                    return `${label}: ${day.unmarked} unmarked`;
+                  })
+                  .join(" · ")}
               </p>
             </div>
-            <button type="button" onClick={reviewUnmarkedAttendance}>
-              Review register
+            <button
+              type="button"
+              onClick={() => reviewUnmarkedAttendance(pendingWeekdays[0].date)}
+            >
+              Review earliest
             </button>
           </section>
+        )}
+        {overviewError && (
+          <div className="attendance-overview-error" role="status">
+            {overviewError}
+          </div>
         )}
         {attendanceNotice && (
           <div className="attendance-notice" role="status">
@@ -659,6 +741,31 @@ function Attendance() {
                 ))}
               </div>
             </div>
+            {!overviewLoading && pendingWeekdays.length > 0 && (
+              <div className="attendance-side-reminder" role="status">
+                <span className="attendance-side-reminder-icon">
+                  <FiAlertCircle aria-hidden="true" />
+                </span>
+                <div className="attendance-side-reminder-copy">
+                  <strong>Attendance to mark this week</strong>
+                  <p>
+                    {pendingWeekdays.length} weekday
+                    {pendingWeekdays.length === 1 ? "" : "s"} need attendance
+                    recorded.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Review unmarked attendance"
+                  title="Review unmarked attendance"
+                  onClick={() =>
+                    reviewUnmarkedAttendance(pendingWeekdays[0].date)
+                  }
+                >
+                  <FiArrowDown aria-hidden="true" />
+                </button>
+              </div>
+            )}
             <div className="weekly-chart">
               {selectedOverviewDays.map((day) => (
                 <div

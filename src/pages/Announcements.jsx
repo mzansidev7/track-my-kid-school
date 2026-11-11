@@ -26,6 +26,7 @@ import {
   showDeleteConfirmationAlert,
 } from "../components/sweetAlert.js";
 import "../styles/announcements.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 const tabs = [
   "All Announcements",
@@ -546,14 +547,15 @@ function Announcements() {
   return (
     <>
       <div className="portal-content announcements-content">
-        <section className="announcements-heading">
-          <div>
-            <p className="page-kicker">SCHOOL COMMUNICATIONS</p>
-            <h1>Announcements</h1>
-            <p>
-              Create and manage announcements for parents, students and staff.
-            </p>
-          </div>
+        <SchoolPageHeader
+          className="announcements-heading"
+          actionsClassName="announcements-actions"
+          eyebrow="SCHOOL COMMUNICATIONS"
+          titleIcon={<span className="school-page-heading-icon"><FiBell /></span>}
+          title="Announcements"
+          description="Create and manage announcements for parents, students and staff."
+          actions={
+            <>
           <div className="announcements-date">
             <FiCalendar /> {todayLabel}
           </div>
@@ -563,7 +565,9 @@ function Announcements() {
           >
             <FiPlus /> New announcement
           </button>
-        </section>
+            </>
+          }
+        />
         <section className="announcement-metrics">
           <article>
             <span className="announcement-metric purple">

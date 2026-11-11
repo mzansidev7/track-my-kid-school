@@ -15,7 +15,9 @@
   padding: 10px;
   color: inherit;
   text-decoration: none;
-  transition: border-color 0.16s ease, background-color 0.16s ease;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease;
 }
 .school-trip-dashboard-row:hover {
   border-color: #c9b8f3;
@@ -89,6 +91,30 @@
   font-size: 10px;
   font-weight: 700;
   text-decoration: none;
+}
+.attendance-dashboard-reminder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 9px;
+  background: #fff7ed;
+  color: #9a3412;
+  text-decoration: none;
+}
+.attendance-dashboard-reminder > span {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+}
+.attendance-dashboard-reminder strong {
+  font-size: 10px;
+}
+.attendance-dashboard-reminder small {
+  color: #9a3412;
+  font-size: 9px;
 }
 
 .portal-topbar {

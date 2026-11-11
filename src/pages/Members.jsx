@@ -10,6 +10,8 @@ import {
 import { apiRequest } from "../api";
 import { supabaseClient } from "../supabaseClient";
 import "../styles/members.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
+import { PresenceStatus } from "../presence/PresenceIndicator";
 import {
   downloadSchoolReport,
   getCachedSchoolReportProfile,
@@ -30,6 +32,7 @@ const roles = [
   ["parent_coordinator", "Parent coordinator"],
   ["safety_officer", "Safety officer"],
   ["security", "Security"],
+  ["driver", "Driver"],
   ["staff", "Staff"],
 ];
 
@@ -99,6 +102,7 @@ export default function Members({
     is_active: true,
   });
   const [saving, setSaving] = useState(false);
+  const [pendingStatusIds, setPendingStatusIds] = useState(() => new Set());
   const [message, setMessage] = useState("");
 
   const [search, setSearch] = useState("");
@@ -110,6 +114,8 @@ export default function Members({
     member.users?.name ||
     [member.first_name, member.last_name].filter(Boolean).join(" ") ||
     "Staff member";
+
+  const getMemberPhone = (member) => member.phone || member.users?.phone || "—";
 
   const getMemberDepartment = (member) => {
     const role = String(member.member_role || "").toLowerCase();
@@ -154,7 +160,7 @@ export default function Members({
     const role = member.member_role || "";
     const name = getMemberName(member);
     const email = member.users?.email || member.email || "";
-    const phone = member.phone || "";
+    const phone = getMemberPhone(member);
     const searchText = `${name} ${email} ${phone}`.toLowerCase();
 
     return (
@@ -195,7 +201,7 @@ export default function Members({
         "Teacher",
       department: getMemberDepartment(member),
       email: member.users?.email || member.email || "—",
-      phone: member.phone || "—",
+      phone: getMemberPhone(member),
       status: getMemberStatus(member),
     }));
 
@@ -235,9 +241,11 @@ export default function Members({
   };
 
   const updateMemberStatus = async (member, isActive) => {
+    if (pendingStatusIds.has(member.id)) return;
     const previousStatus = member.status;
     const previousIsActive = member.is_active;
 
+    setPendingStatusIds((current) => new Set(current).add(member.id));
     setMembers((current) =>
       current.map((item) =>
         item.id === member.id
@@ -266,6 +274,12 @@ export default function Members({
         ),
       );
       setMessage(error.message);
+    } finally {
+      setPendingStatusIds((current) => {
+        const next = new Set(current);
+        next.delete(member.id);
+        return next;
+      });
     }
   };
 
@@ -370,21 +384,27 @@ export default function Members({
   return (
     <>
       <div className="portal-content members-content">
-        <section className="members-heading">
-          <div>
-            <p className="page-kicker">SCHOOL ADMINISTRATION</p>
-            <h1>Staff Members</h1>
-            <p>Manage school users, roles and contact information.</p>
-          </div>
-          {!isFormControlled && (
-            <button
-              className="member-primary"
-              onClick={() => updateFormOpen(true)}
-            >
-              <FiUsers /> Add staff member
-            </button>
-          )}
-        </section>
+        <SchoolPageHeader
+          className="members-heading"
+          eyebrow="SCHOOL ADMINISTRATION"
+          titleIcon={
+            <span className="school-page-heading-icon">
+              <FiUsers />
+            </span>
+          }
+          title="Staff Members"
+          description="Manage school users, roles and contact information."
+          actions={
+            !isFormControlled ? (
+              <button
+                className="member-primary"
+                onClick={() => updateFormOpen(true)}
+              >
+                <FiUsers /> Add staff member
+              </button>
+            ) : null
+          }
+        />
         {message && <div className="member-message">{message}</div>}
         <section className="member-metrics">
           <article>
@@ -483,6 +503,14 @@ export default function Members({
           </article>
         </section>
         <section className="members-panel">
+          <div className="members-panel-head">
+            <div>
+              <h2>All staff members</h2>
+              <span>
+                {filteredMembers.length} of {members.length} shown
+              </span>
+            </div>
+          </div>
           <div className="members-toolbar">
             <label className="members-search">
               <FiSearch />
@@ -535,7 +563,9 @@ export default function Members({
             <table>
               <thead>
                 <tr>
+                  <th>Avatar</th>
                   <th>Staff Member</th>
+                  <th>Email Address</th>
                   <th>Role</th>
                   <th>Department</th>
                   <th>Contact</th>
@@ -557,18 +587,40 @@ export default function Members({
                   return (
                     <tr key={member.id}>
                       <td>
-                        <strong>{getMemberName(member)}</strong>
-                        <small>{email}</small>
+                        <div className="member-avatar-cell">
+                          <span className="member-table-avatar">
+                            {member.avatar ? (
+                              <img
+                                src={member.avatar}
+                                alt={getMemberName(member)}
+                              />
+                            ) : (
+                              <FiUser aria-hidden="true" />
+                            )}
+                          </span>
+                          <small className="member-id">
+                            STF - {member.id.slice(0, 8)}
+                          </small>
+                        </div>
                       </td>
+                      <td>
+                        <strong>{getMemberName(member)}</strong>
+                        <PresenceStatus
+                          userId={member.user_id || member.users?.id}
+                        />
+                      </td>
+                      <td>{email}</td>
                       <td>{role}</td>
                       <td>{getMemberDepartment(member)}</td>
-                      <td>{member.phone || "—"}</td>
+                      <td>{getMemberPhone(member)}</td>
                       <td>
                         <button
                           type="button"
                           className="member-status-toggle"
                           role="switch"
                           aria-checked={status === "Active"}
+                          aria-busy={pendingStatusIds.has(member.id)}
+                          disabled={pendingStatusIds.has(member.id)}
                           aria-label={`${status === "Active" ? "Deactivate" : "Activate"} ${getMemberName(member)}`}
                           onClick={() =>
                             updateMemberStatus(member, status !== "Active")
@@ -682,9 +734,15 @@ export default function Members({
               />
               <select
                 value={form.member_role}
-                onChange={(event) =>
-                  setForm({ ...form, member_role: event.target.value })
-                }
+                onChange={(event) => {
+                  const memberRole = event.target.value;
+                  setForm({
+                    ...form,
+                    member_role: memberRole,
+                    access_level:
+                      memberRole === "driver" ? "transport" : form.access_level,
+                  });
+                }}
               >
                 {roles.map(([value, label]) => (
                   <option key={value} value={value}>
@@ -694,6 +752,7 @@ export default function Members({
               </select>
               <select
                 value={form.access_level}
+                disabled={form.member_role === "driver"}
                 onChange={(event) =>
                   setForm({ ...form, access_level: event.target.value })
                 }
@@ -705,6 +764,11 @@ export default function Members({
                 <option value="support">Support</option>
                 <option value="read_only">Read only</option>
               </select>
+              {form.member_role === "driver" && (
+                <small className="member-access-note">
+                  Driver access is automatically limited to transport features.
+                </small>
+              )}
               <label className="member-active-field">
                 <input
                   type="checkbox"

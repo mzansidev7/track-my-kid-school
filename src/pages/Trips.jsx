@@ -12,21 +12,40 @@ import {
   FiMapPin,
   FiPlus,
   FiSearch,
+  FiTrash2,
   FiTruck,
   FiUsers,
   FiX,
 } from "react-icons/fi";
 import { apiRequest } from "../api";
+import { supabaseClient } from "../supabaseClient";
 import {
   APIProvider,
   AdvancedMarker,
   Map as GoogleMap,
   useMapsLibrary,
 } from "@vis.gl/react-google-maps";
-import { successMessage, showErrorAlert } from "../components/sweetAlert.js";
+import {
+  showDeleteConfirmationAlert,
+  successMessage,
+  showErrorAlert,
+} from "../components/sweetAlert.js";
 import "../styles/trips.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const isFreshTracking = (tracking) => {
+  const recordedAt = new Date(tracking?.recorded_at || "").getTime();
+  const age = Date.now() - recordedAt;
+  return Number.isFinite(recordedAt) && age >= 0 && age <= 120_000;
+};
+const journeyPhaseLabel = (phase) =>
+  ({
+    outbound: "Outbound",
+    at_destination: "At destination · sharing paused",
+    returning: "Returning",
+    completed: "Vehicle returned",
+  })[phase] || "Outbound";
 
 const categories = [
   ["educational", "Educational"],
@@ -46,31 +65,24 @@ const statuses = [
   "in_progress",
   "completed",
   "cancelled",
+  "missed",
 ];
 const tripStatusTransitions = {
-  draft: ["draft", "registration_open", "preparing", "cancelled"],
+  draft: ["draft", "registration_open", "cancelled"],
   registration_open: [
-    "draft",
     "registration_open",
     "confirmed",
-    "preparing",
     "cancelled",
   ],
-  confirmed: ["draft", "confirmed", "preparing", "cancelled"],
-  preparing: ["draft", "preparing", "cancelled"],
-  in_progress: ["in_progress", "completed"],
+  confirmed: ["confirmed", "preparing", "cancelled"],
+  preparing: ["preparing", "cancelled"],
+  in_progress: ["in_progress"],
   completed: ["completed"],
   cancelled: ["cancelled"],
+  missed: ["missed"],
 };
-const availableTripStatuses = (status, hasAssignedVehicle) => {
-  const validTransitions = tripStatusTransitions[status] || [status];
-  return hasAssignedVehicle
-    ? validTransitions
-    : validTransitions.filter(
-        (nextStatus) =>
-          nextStatus === status || ["draft", "preparing"].includes(nextStatus),
-      );
-};
+const availableTripStatuses = (status) =>
+  tripStatusTransitions[status] || [status];
 const pageSize = 6;
 const emptyTrip = {
   name: "",
@@ -83,6 +95,7 @@ const emptyTrip = {
   departure_at: "",
   return_at: "",
   registration_closes_at: "",
+  target_grade: "all",
   status: "draft",
   is_free: false,
   price: "",
@@ -117,6 +130,22 @@ const getAuth = () => {
     return {};
   }
 };
+const readTripsCache = (cacheKey) => {
+  try {
+    const data = JSON.parse(localStorage.getItem(cacheKey) || "null")?.data;
+    return Array.isArray(data?.trips) && data?.resources ? data : null;
+  } catch {
+    return null;
+  }
+};
+const readAssignedTripsCache = (cacheKey) => {
+  try {
+    const data = JSON.parse(localStorage.getItem(cacheKey) || "null")?.data;
+    return Array.isArray(data?.trips) ? data.trips : null;
+  } catch {
+    return null;
+  }
+};
 const localDateTime = (value) => {
   if (!value) return "";
   const date = new Date(value);
@@ -134,10 +163,54 @@ const displayDate = (value) =>
 const fullName = (member) =>
   [member?.first_name, member?.last_name].filter(Boolean).join(" ") ||
   "Not assigned";
+const tripEditSignature = (form, vehicleIds, assignments) =>
+  JSON.stringify({
+    form: Object.fromEntries(
+      Object.entries(form)
+        .filter(
+          ([key]) =>
+            ![
+              "id",
+              "school_id",
+              "created_by",
+              "created_at",
+              "updated_at",
+              "published_at",
+              "vehicles",
+              "learners",
+              "registered_count",
+            ].includes(key),
+        )
+        .sort(([first], [second]) => first.localeCompare(second)),
+    ),
+    vehicleIds: [...vehicleIds].sort(),
+    assignments: Object.fromEntries(
+      Object.entries(assignments).sort(([first], [second]) =>
+        first.localeCompare(second),
+      ),
+    ),
+  });
 const money = (trip) =>
   trip.is_free
     ? "Free"
     : `${trip.currency || "ZAR"} ${Number(trip.price || 0).toFixed(2)}`;
+const cashRequestLabel = (trip, learner) => {
+  const requestType =
+    learner.cash_payment_request === "deposit"
+      ? "deposit"
+      : learner.payment_status === "deposit_paid"
+        ? "balance"
+        : "full amount";
+  const amount =
+    learner.cash_payment_amount != null
+      ? Number(learner.cash_payment_amount)
+      : requestType === "deposit"
+        ? Number(trip.deposit || 0)
+        : requestType === "balance"
+          ? Math.max(0, Number(trip.price || 0) - Number(trip.deposit || 0))
+          : Number(trip.price || 0);
+  return `${requestType} ${trip.currency || "ZAR"} ${amount.toFixed(2)}`;
+};
 const tripSeatCapacity = (trip) =>
   (trip.vehicles || []).reduce(
     (total, assignment) =>
@@ -145,17 +218,24 @@ const tripSeatCapacity = (trip) =>
     0,
   );
 const tripSeatRequirement = (trip) =>
-  Number(trip.maximum_learners || trip.minimum_learners || 0);
+  Number(trip.minimum_learners || 0);
+
 const tripNeedsMoreVehicles = (trip) =>
   tripSeatRequirement(trip) > tripSeatCapacity(trip);
-const registrationState = (trip) => {
+const registrationDeadlinePassed = (trip, now = Date.now()) => {
+  if (
+    trip.status !== "registration_open" ||
+    !trip.registration_closes_at
+  ) {
+    return false;
+  }
+  const deadline = new Date(trip.registration_closes_at).getTime();
+  return Number.isFinite(deadline) && deadline <= now;
+};
+const registrationState = (trip, now = Date.now()) => {
   if (trip.status === "draft") return "Not published";
   if (trip.status !== "registration_open") return "Closed";
-  if (
-    trip.registration_closes_at &&
-    new Date(trip.registration_closes_at).getTime() < Date.now()
-  )
-    return "Closed";
+  if (registrationDeadlinePassed(trip, now)) return "Closed";
   return "Open";
 };
 
@@ -344,6 +424,8 @@ function TripLiveMap({ trip }) {
   const livePoints = (trip.vehicles || [])
     .filter(
       (assignment) =>
+        ["outbound", "returning"].includes(assignment.journey_phase) &&
+        isFreshTracking(assignment.tracking) &&
         Number.isFinite(Number(assignment.tracking?.latitude)) &&
         Number.isFinite(Number(assignment.tracking?.longitude)),
     )
@@ -476,19 +558,281 @@ function SchoolVehicleCard({ vehicle, onEdit }) {
   );
 }
 
+function DriverTrips() {
+  const auth = getAuth();
+  const userId = auth.user?.id || "";
+  const cacheKey = `schoolAssignedTripsCache:${userId || "current"}`;
+  const initialTrips = readAssignedTripsCache(cacheKey);
+  const [trips, setTrips] = useState(initialTrips || []);
+  const [loading, setLoading] = useState(!initialTrips);
+  const [error, setError] = useState("");
+
+  const loadTrips = useCallback(
+    async (isActive = () => true) => {
+      if (!auth.token) {
+        if (isActive()) setLoading(false);
+        return;
+      }
+      try {
+        const data = await apiRequest("/school/trips", {
+          headers: { Authorization: `Bearer ${auth.token || ""}` },
+        });
+        if (!isActive()) return;
+        const nextTrips = Array.isArray(data) ? data : [];
+        setTrips(nextTrips);
+        setError("");
+        try {
+          localStorage.setItem(
+            cacheKey,
+            JSON.stringify({
+              data: { trips: nextTrips },
+              timestamp: Date.now(),
+            }),
+          );
+        } catch (cacheError) {
+          console.error("Could not cache assigned school trips:", cacheError);
+        }
+      } catch (requestError) {
+        if (isActive()) {
+          setError(requestError.message || "Could not load assigned trips.");
+        }
+      } finally {
+        if (isActive()) setLoading(false);
+      }
+    },
+    [auth.token, cacheKey],
+  );
+
+  useEffect(() => {
+    let active = true;
+    let refreshTimeout;
+    const scheduleRefresh = () => {
+      window.clearTimeout(refreshTimeout);
+      refreshTimeout = window.setTimeout(
+        () => void loadTrips(() => active),
+        250,
+      );
+    };
+    const initialLoadTimeout = window.setTimeout(
+      () => void loadTrips(() => active),
+      0,
+    );
+    const channel =
+      supabaseClient && userId
+        ? supabaseClient
+            .channel(`school-assigned-trips:${userId}`)
+            .on(
+              "postgres_changes",
+              { event: "*", schema: "public", table: "school_trips" },
+              scheduleRefresh,
+            )
+            .on(
+              "postgres_changes",
+              { event: "*", schema: "public", table: "school_trip_vehicles" },
+              scheduleRefresh,
+            )
+            .on(
+              "postgres_changes",
+              { event: "*", schema: "public", table: "school_trip_tracking" },
+              scheduleRefresh,
+            )
+            .on(
+              "postgres_changes",
+              { event: "*", schema: "public", table: "school_trip_learners" },
+              scheduleRefresh,
+            )
+            .on(
+              "postgres_changes",
+              { event: "*", schema: "public", table: "school_vehicles" },
+              scheduleRefresh,
+            )
+            .subscribe((status) => {
+              if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+                console.warn(
+                  "Assigned school trips realtime unavailable:",
+                  status,
+                );
+              }
+            })
+        : null;
+    return () => {
+      active = false;
+      window.clearTimeout(initialLoadTimeout);
+      window.clearTimeout(refreshTimeout);
+      if (channel) void supabaseClient.removeChannel(channel);
+    };
+  }, [loadTrips, userId]);
+
+  return (
+    <div className="portal-content">
+      <SchoolPageHeader
+        eyebrow="TRANSPORT"
+        titleIcon={<span className="school-page-heading-icon"><FiTruck /></span>}
+        title="My assigned trips"
+        description="Your trip schedule, assigned vehicle and journey status."
+      />
+      {loading ? (
+        <div className="driver-trips-loading" role="status">
+          <FiLoader aria-hidden="true" />
+          <span>Loading your assigned trips...</span>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="driver-trips-message driver-trips-error" role="alert">
+          <FiAlertCircle aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      ) : null}
+      {!loading && !error && trips.length === 0 ? (
+        <section className="driver-trips-empty">
+          <span className="driver-trips-empty-icon">
+            <FiTruck aria-hidden="true" />
+          </span>
+          <h2>No trips assigned yet</h2>
+          <p>
+            Trips assigned to you by your school will appear here with their
+            schedule and vehicle details.
+          </p>
+        </section>
+      ) : null}
+      <div className="driver-trips-list">
+        {trips.map((trip) => {
+          const assignment =
+            (trip.vehicles || []).find(
+              (item) =>
+                item.driver_admin_id === auth.user?.admin_profile?.id ||
+                item.driver?.user_id === auth.user?.id,
+            ) || (trip.vehicles || [])[0];
+          const status = (trip.status || "scheduled").replaceAll("_", " ");
+          const phase = assignment?.journey_phase;
+          const vehicle = assignment?.vehicle;
+          return (
+            <article
+              key={trip.id}
+              className={`driver-trip-card${trip.status === "in_progress" ? " is-live" : ""}`}
+            >
+              <header className="driver-trip-card-header">
+                <div className="driver-trip-card-title">
+                  <span className="driver-trip-card-icon">
+                    <FiTruck aria-hidden="true" />
+                  </span>
+                  <div>
+                    <h2>{trip.name || "School trip"}</h2>
+                    <p>
+                      {trip.category?.replaceAll("_", " ") || "School trip"}
+                    </p>
+                  </div>
+                </div>
+                <div className="driver-trip-badges">
+                  <span
+                    className={`driver-trip-status status-${(trip.status || "scheduled").replaceAll("_", "-")}`}
+                  >
+                    {trip.status === "in_progress" ? (
+                      <span
+                        className="driver-trip-live-dot"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    {status}
+                  </span>
+                  {phase ? (
+                    <span className={`driver-trip-phase phase-${phase}`}>
+                      {journeyPhaseLabel(phase)}
+                    </span>
+                  ) : null}
+                </div>
+              </header>
+              <div className="driver-trip-destination">
+                <FiMapPin aria-hidden="true" />
+                <div>
+                  <small>Destination</small>
+                  <strong>
+                    {trip.destination_address || trip.destination || "Not set"}
+                  </strong>
+                </div>
+              </div>
+              <div className="driver-trip-details">
+                <div className="driver-trip-detail">
+                  <FiCalendar aria-hidden="true" />
+                  <div>
+                    <small>Departure</small>
+                    <strong>{displayDate(trip.departure_at)}</strong>
+                  </div>
+                </div>
+                <div className="driver-trip-detail">
+                  <FiCalendar aria-hidden="true" />
+                  <div>
+                    <small>Return</small>
+                    <strong>{displayDate(trip.return_at)}</strong>
+                  </div>
+                </div>
+              </div>
+              <footer className="driver-trip-vehicle">
+                <span className="driver-trip-vehicle-icon">
+                  <FiTruck aria-hidden="true" />
+                </span>
+                <div>
+                  <small>Assigned vehicle</small>
+                  <strong>
+                    {vehicle?.name ||
+                      vehicle?.registration_number ||
+                      "Vehicle not assigned"}
+                  </strong>
+                  {vehicle?.registration_number && vehicle.name ? (
+                    <span>{vehicle.registration_number}</span>
+                  ) : null}
+                </div>
+                {vehicle?.passenger_capacity ? (
+                  <span className="driver-trip-capacity">
+                    <FiUsers aria-hidden="true" />
+                    {vehicle.passenger_capacity} seats
+                  </span>
+                ) : null}
+              </footer>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function Trips() {
   const auth = getAuth();
-  const [trips, setTrips] = useState([]);
-  const [resources, setResources] = useState({
-    vehicles: [],
-    learners: [],
-    staff: [],
-  });
-  const [loading, setLoading] = useState(true);
+  const cachedAdmin = (() => {
+    try {
+      const key = `schoolProfileCache:${auth.user?.id || "current"}`;
+      return JSON.parse(localStorage.getItem(key) || "null")?.data
+        ?.admin_profile;
+    } catch {
+      return null;
+    }
+  })();
+  const role =
+    auth.user?.admin_profile?.role ||
+    auth.admin_profile?.role ||
+    cachedAdmin?.role;
+  if (role === "driver") return <DriverTrips />;
+  return <AdminTrips />;
+}
+
+function AdminTrips() {
+  const auth = getAuth();
+  const canDeleteTrips = ["full", "management"].includes(
+    auth.user?.admin_profile?.access_level || auth.admin_profile?.access_level,
+  );
+  const cacheKey = `schoolTripsCache:${auth.user?.id || "current"}`;
+  const initialCache = readTripsCache(cacheKey);
+  const [trips, setTrips] = useState(initialCache?.trips || []);
+  const [resources, setResources] = useState(
+    initialCache?.resources || { vehicles: [], learners: [], staff: [] },
+  );
+  const [loading, setLoading] = useState(!initialCache);
+  const [currentTime, setCurrentTime] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deletingTripId, setDeletingTripId] = useState(null);
   const [updatingTripStatuses, setUpdatingTripStatuses] = useState({});
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("All trips");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -500,6 +844,7 @@ export default function Trips() {
   const [modal, setModal] = useState(null);
   const [editingTrip, setEditingTrip] = useState(null);
   const [tripForm, setTripForm] = useState(emptyTrip);
+  const [tripEditBaseline, setTripEditBaseline] = useState(null);
   const [destinationLocked, setDestinationLocked] = useState(false);
   const handlePlaceSelected = useCallback(() => {
     setDestinationLocked(true);
@@ -515,10 +860,12 @@ export default function Trips() {
       destination_longitude: "",
     }));
   }, [destinationLocked, editingTrip]);
-  const [gradeFilter, setGradeFilter] = useState("all");
-  const [selectedLearners, setSelectedLearners] = useState({});
   const [learnerAssignments, setLearnerAssignments] = useState({});
   const [learnerVehicleChoice, setLearnerVehicleChoice] = useState([]);
+  const hasTripEdits =
+    Boolean(editingTrip) &&
+    tripEditSignature(tripForm, learnerVehicleChoice, learnerAssignments) !==
+      tripEditBaseline;
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle);
   const [editingVehicle, setEditingVehicle] = useState(null);
   const [vehicleAssets, setVehicleAssets] = useState({
@@ -539,8 +886,8 @@ export default function Trips() {
         apiRequest("/school/trips", { headers }),
         apiRequest("/school/trips/resources", { headers }),
       ]);
-      setTrips(Array.isArray(tripData) ? tripData : []);
-      setResources({
+      const nextTrips = Array.isArray(tripData) ? tripData : [];
+      const nextResources = {
         vehicles: Array.isArray(resourceData.vehicles)
           ? resourceData.vehicles
           : [],
@@ -548,13 +895,22 @@ export default function Trips() {
           ? resourceData.learners
           : [],
         staff: Array.isArray(resourceData.staff) ? resourceData.staff : [],
-      });
+      };
+      setTrips(nextTrips);
+      setResources(nextResources);
+      localStorage.setItem(
+        cacheKey,
+        JSON.stringify({
+          data: { trips: nextTrips, resources: nextResources },
+          timestamp: Date.now(),
+        }),
+      );
     } catch (requestError) {
       setError(requestError.message || "Unable to load school trips.");
     } finally {
       setLoading(false);
     }
-  }, [auth.token]);
+  }, [auth.token, cacheKey]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void loadData(), 0);
@@ -562,12 +918,65 @@ export default function Trips() {
   }, [loadData]);
 
   useEffect(() => {
-    if (!trips.some((trip) => trip.status === "in_progress")) {
-      return undefined;
-    }
-    const interval = window.setInterval(() => void loadData(), 10000);
-    return () => window.clearInterval(interval);
-  }, [loadData, trips]);
+    if (!supabaseClient || !auth.user?.id) return undefined;
+    let refreshTimeout;
+    const scheduleRefresh = () => {
+      window.clearTimeout(refreshTimeout);
+      refreshTimeout = window.setTimeout(() => void loadData(), 200);
+    };
+    const channel = supabaseClient
+      .channel(`school-trips:${auth.user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "school_trips" },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "school_trip_vehicles" },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "school_trip_learners" },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "school_vehicles" },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "school_trip_tracking" },
+        scheduleRefresh,
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("School trips realtime unavailable:", status);
+        }
+      });
+
+    return () => {
+      window.clearTimeout(refreshTimeout);
+      void supabaseClient.removeChannel(channel);
+    };
+  }, [auth.user?.id, loadData]);
+
+  useEffect(() => {
+    const initialTimeTimeout = window.setTimeout(
+      () => setCurrentTime(Date.now()),
+      0,
+    );
+    const clockInterval = window.setInterval(
+      () => setCurrentTime(Date.now()),
+      60_000,
+    );
+    return () => {
+      window.clearTimeout(initialTimeTimeout);
+      window.clearInterval(clockInterval);
+    };
+  }, []);
 
   useEffect(
     () => () => {
@@ -591,18 +1000,18 @@ export default function Trips() {
     }
     setDestinationLocked(Boolean(trip));
     setEditingTrip(trip);
-    setGradeFilter("all");
     if (!trip) {
       setTripForm(emptyTrip);
-      setSelectedLearners({});
       setLearnerAssignments({});
       setLearnerVehicleChoice([]);
+      setTripEditBaseline(null);
       setModal("trip");
       return;
     }
-    setTripForm({
+    const nextTripForm = {
       ...emptyTrip,
       ...trip,
+      target_grade: trip.target_grade || "all",
       departure_at: localDateTime(trip.departure_at),
       return_at: localDateTime(trip.return_at),
       registration_closes_at: localDateTime(trip.registration_closes_at),
@@ -611,28 +1020,23 @@ export default function Trips() {
       price: trip.price ?? "",
       deposit: trip.deposit ?? "",
       maximum_learners: trip.maximum_learners ?? "",
-    });
-    const selected = {};
+    };
     const learnerVehicles = {};
-    const assignmentById = new Map(
-      (trip.vehicles || []).map((assignment) => [assignment.id, assignment]),
-    );
-    (trip.learners || []).forEach((item) => {
-      if (item.registration_status === "registered") {
-        selected[item.child_id] = true;
-        learnerVehicles[item.child_id] =
-          assignmentById.get(item.vehicle_assignment_id)?.vehicle_id || "";
-      }
+    (trip.vehicles || []).forEach((assignment) => {
+      learnerVehicles[`__driver_${assignment.vehicle_id}`] =
+        assignment.driver_admin_id || "";
+      learnerVehicles[`__coordinator_${assignment.vehicle_id}`] =
+        assignment.coordinator_admin_id || "";
     });
-    setSelectedLearners(selected);
     setLearnerAssignments(learnerVehicles);
-    const existingVehicleIds = [
-      ...new Set([
-        ...(trip.vehicles || []).map((assignment) => assignment.vehicle_id),
-        ...Object.values(learnerVehicles).filter(Boolean),
-      ]),
-    ];
+    const existingVehicleIds = (trip.vehicles || []).map(
+      (assignment) => assignment.vehicle_id,
+    );
+    setTripForm(nextTripForm);
     setLearnerVehicleChoice(existingVehicleIds);
+    setTripEditBaseline(
+      tripEditSignature(nextTripForm, existingVehicleIds, learnerVehicles),
+    );
     setModal("trip");
   };
 
@@ -646,104 +1050,92 @@ export default function Trips() {
     [resources.learners],
   );
 
-  const filteredTrips = useMemo(
-    () =>
-      trips.filter((trip) => {
-        const needle = query.toLowerCase().trim();
-        const searchable =
-          `${trip.name} ${trip.destination} ${trip.status} ${(trip.vehicles || []).map((row) => `${row.vehicle?.name || ""} ${row.vehicle?.registration_number || ""} ${fullName(row.driver)}`).join(" ")}`.toLowerCase();
-        const tabMatches =
-          activeTab === "All trips" ||
-          (activeTab === "Upcoming" &&
-            !["completed", "cancelled"].includes(trip.status)) ||
-          (activeTab === "Completed" && trip.status === "completed") ||
-          trip.category === activeTab.toLowerCase();
-        return (
-          tabMatches &&
-          (!needle || searchable.includes(needle)) &&
-          (statusFilter === "all" || trip.status === statusFilter) &&
-          (typeFilter === "all" || trip.category === typeFilter) &&
-          (!dateFilter || trip.departure_at?.slice(0, 10) === dateFilter) &&
-          (vehicleFilter === "all" ||
-            (trip.vehicles || []).some(
-              (assignment) => assignment.vehicle_id === vehicleFilter,
-            )) &&
-          (staffFilter === "all" ||
-            (trip.vehicles || []).some(
-              (assignment) =>
-                assignment.driver_admin_id === staffFilter ||
-                assignment.coordinator_admin_id === staffFilter,
-            )) &&
-          (!destinationFilter ||
-            trip.destination
-              .toLowerCase()
-              .includes(destinationFilter.toLowerCase()))
-        );
-      }),
-    [
-      activeTab,
-      dateFilter,
-      destinationFilter,
-      query,
-      staffFilter,
-      statusFilter,
-      trips,
-      typeFilter,
-      vehicleFilter,
-    ],
-  );
+  const filteredTrips = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const destinationNeedle = destinationFilter.trim().toLowerCase();
+    return trips.filter((trip) => {
+      const assignments = trip.vehicles || [];
+      const searchable = [
+        trip.name,
+        trip.destination,
+        trip.destination_address,
+        trip.status,
+        trip.category,
+        ...assignments.flatMap((assignment) => [
+          assignment.vehicle?.name,
+          assignment.vehicle?.registration_number,
+          fullName(assignment.driver),
+          fullName(assignment.coordinator),
+        ]),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const tripDate = trip.departure_at ? new Date(trip.departure_at) : null;
+      const matchesDate =
+        !dateFilter ||
+        (tripDate &&
+          !Number.isNaN(tripDate.getTime()) &&
+          [
+            tripDate.getFullYear(),
+            String(tripDate.getMonth() + 1).padStart(2, "0"),
+            String(tripDate.getDate()).padStart(2, "0"),
+          ].join("-") === dateFilter);
+      return (
+        (!needle || searchable.includes(needle)) &&
+        (statusFilter === "all" || trip.status === statusFilter) &&
+        (typeFilter === "all" || trip.category === typeFilter) &&
+        matchesDate &&
+        (vehicleFilter === "all" ||
+          assignments.some(
+            (assignment) => assignment.vehicle_id === vehicleFilter,
+          )) &&
+        (staffFilter === "all" ||
+          assignments.some(
+            (assignment) =>
+              assignment.driver_admin_id === staffFilter ||
+              assignment.coordinator_admin_id === staffFilter,
+          )) &&
+        (!destinationNeedle ||
+          String(trip.destination || "")
+            .toLowerCase()
+            .includes(destinationNeedle))
+      );
+    });
+  }, [
+    dateFilter,
+    destinationFilter,
+    query,
+    staffFilter,
+    statusFilter,
+    trips,
+    typeFilter,
+    vehicleFilter,
+  ]);
   const totalPages = Math.max(1, Math.ceil(filteredTrips.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageTrips = filteredTrips.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize,
   );
-  const selectedCount = Object.values(selectedLearners).filter(Boolean).length;
-  const assignLearnersToVehicles = (learnerIds, vehicleIds) => {
-    const selectedVehicleIds = [...new Set(vehicleIds)];
-    setLearnerVehicleChoice(selectedVehicleIds);
-    setLearnerAssignments((current) => {
-      const next = { ...current };
-      learnerIds.forEach((learnerId) => delete next[learnerId]);
-      const remainingSeats = new Map(
-        selectedVehicleIds.map((vehicleId) => [
-          vehicleId,
-          Number(
-            resources.vehicles.find((vehicle) => vehicle.id === vehicleId)
-              ?.passenger_capacity || 0,
-          ),
-        ]),
-      );
-      let vehicleIndex = 0;
-      learnerIds.forEach((learnerId) => {
-        for (
-          let attempts = 0;
-          attempts < selectedVehicleIds.length;
-          attempts += 1
-        ) {
-          const vehicleId =
-            selectedVehicleIds[vehicleIndex % selectedVehicleIds.length];
-          vehicleIndex = (vehicleIndex + 1) % selectedVehicleIds.length;
-          const seats = remainingSeats.get(vehicleId) || 0;
-          if (seats <= 0) continue;
-          next[learnerId] = vehicleId;
-          remainingSeats.set(vehicleId, seats - 1);
-          break;
-        }
-      });
-      return next;
-    });
-  };
-  const selectLearnerGrade = (grade) => {
-    setGradeFilter(grade);
-    const selectedIds = resources.learners
-      .filter((student) => grade === "all" || student.grade === grade)
-      .map((student) => student.id);
-    setSelectedLearners(
-      Object.fromEntries(selectedIds.map((learnerId) => [learnerId, true])),
+  const upcomingTripCount = trips.filter((trip) => {
+    const departure = new Date(trip.departure_at);
+    return (
+      ["registration_open", "confirmed", "preparing"].includes(trip.status) &&
+      !Number.isNaN(departure.getTime()) &&
+      currentTime !== null &&
+      departure.getTime() > currentTime
     );
-    assignLearnersToVehicles(selectedIds, learnerVehicleChoice);
-  };
+  }).length;
+  const eligibleRegistrationCount = trips.reduce(
+    (sum, trip) => sum + (Number(trip.registered_count) || 0),
+    0,
+  );
+  const selectedCount = resources.learners.filter(
+    (student) =>
+      tripForm.target_grade === "all" ||
+      student.grade === tripForm.target_grade,
+  ).length;
   const selectedVehicleIds = learnerVehicleChoice;
   const selectedCapacity = selectedVehicleIds.reduce(
     (sum, vehicleId) =>
@@ -758,15 +1150,13 @@ export default function Trips() {
     0,
     Number(tripForm.minimum_learners || 0) - selectedCapacity,
   );
-  const maximumSeatShortfall = tripForm.maximum_learners
-    ? Math.max(Number(tripForm.maximum_learners) - selectedCapacity, 0)
-    : 0;
-
   const submitTrip = async (event) => {
     event.preventDefault();
     setError("");
     if (!editingTrip && resources.learners.length === 0) {
-      setError("Add at least one student to your school before creating a trip.");
+      setError(
+        "Add at least one student to your school before creating a trip.",
+      );
       return;
     }
     if (!tripForm.departure_at || !tripForm.return_at) {
@@ -794,32 +1184,18 @@ export default function Trips() {
       setError("Registration must close before the departure date and time.");
       return;
     }
+    if (
+      tripForm.status === "registration_open" &&
+      (registrationClosesTime === null || registrationClosesTime <= Date.now())
+    ) {
+      setError(
+        "Choose a future registration closing time before opening registration.",
+      );
+      return;
+    }
     if (!tripForm.is_free && Number(tripForm.price) < 0) {
       setError("Trip price cannot be negative.");
       return;
-    }
-    if (
-      tripForm.maximum_learners &&
-      selectedCount > Number(tripForm.maximum_learners)
-    ) {
-      setError("Selected learners exceed the trip registration capacity.");
-      return;
-    }
-    const assignmentsByVehicle = new Map();
-    const selectedLearnerIds = Object.keys(selectedLearners).filter(
-      (id) => selectedLearners[id],
-    );
-    const unassignedLearnerIds = [];
-    for (const learner of resources.learners) {
-      if (!selectedLearners[learner.id]) continue;
-      const vehicleId = learnerAssignments[learner.id];
-      if (!vehicleId) {
-        unassignedLearnerIds.push(learner.id);
-        continue;
-      }
-      if (!assignmentsByVehicle.has(vehicleId))
-        assignmentsByVehicle.set(vehicleId, []);
-      assignmentsByVehicle.get(vehicleId).push(learner.id);
     }
     const vehiclePayload = learnerVehicleChoice.map((vehicleId) => {
       const prior = editingTrip?.vehicles?.find(
@@ -835,20 +1211,11 @@ export default function Trips() {
           learnerAssignments[`__coordinator_${vehicleId}`] ??
           prior?.coordinator_admin_id ??
           "",
-        child_ids: assignmentsByVehicle.get(vehicleId) || [],
       };
     });
-    const saveAsDraft = !editingTrip && vehiclePayload.length === 0;
-    const status = saveAsDraft ? "draft" : tripForm.status;
-    const canKeepUnassignedLearners =
-      status === "draft" && vehiclePayload.length === 0;
-    if (unassignedLearnerIds.length && !canKeepUnassignedLearners) {
-      const learner = resources.learners.find(
-        (item) => item.id === unassignedLearnerIds[0],
-      );
-      setError(
-        `Assign ${learner?.name || "each selected learner"} to a school vehicle.`,
-      );
+    const status = tripForm.status;
+    if (status === "registration_open" && vehiclePayload.length === 0) {
+      setError("Assign at least one staffed vehicle before opening registration.");
       return;
     }
     const unstaffedVehicle = vehiclePayload.find(
@@ -858,9 +1225,12 @@ export default function Trips() {
       setError("Assign a driver to every selected vehicle.");
       return;
     }
-    if (vehiclePayload.length && selectedCount > selectedCapacity) {
+    if (
+      vehiclePayload.length &&
+      Number(tripForm.minimum_learners || 0) > selectedCapacity
+    ) {
       setError(
-        "Learners exceed the passenger capacity of the assigned vehicles.",
+        "Assigned vehicle capacity must fit the minimum learner count.",
       );
       return;
     }
@@ -869,6 +1239,7 @@ export default function Trips() {
       const payload = {
         ...tripForm,
         status,
+        target_grade: tripForm.target_grade || "all",
         destination_latitude:
           tripForm.destination_latitude === ""
             ? null
@@ -890,7 +1261,6 @@ export default function Trips() {
           ? new Date(tripForm.registration_closes_at).toISOString()
           : null,
         vehicles: vehiclePayload,
-        child_ids: selectedLearnerIds,
       };
       const savedTrip = await apiRequest(
         editingTrip ? `/school/trips/${editingTrip.id}` : "/school/trips",
@@ -904,9 +1274,7 @@ export default function Trips() {
       setModal(null);
       setSelectedTrip(savedTrip);
       successMessage({
-        title: saveAsDraft
-          ? "Trip saved as draft — assign a vehicle to publish"
-          : editingTrip
+        title: editingTrip
             ? "Trip updated"
             : "Trip created",
       });
@@ -1009,6 +1377,30 @@ export default function Trips() {
         delete next[trip.id];
         return next;
       });
+    }
+  };
+
+  const deleteTrip = async (trip) => {
+    if (deletingTripId) return;
+    const confirmation = await showDeleteConfirmationAlert({
+      title: `Delete "${trip.name}"?`,
+      text: "This permanently removes the trip, learner registrations, vehicle assignments and tracking history. A trip currently in progress cannot be deleted.",
+    });
+    if (!confirmation.isConfirmed) return;
+
+    setDeletingTripId(trip.id);
+    try {
+      await apiRequest(`/school/trips/${trip.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${auth.token || ""}` },
+      });
+      setSelectedTrip((current) => (current?.id === trip.id ? null : current));
+      await loadData();
+      successMessage({ title: "School trip deleted" });
+    } catch (requestError) {
+      showErrorAlert(requestError.message || "Unable to delete school trip.");
+    } finally {
+      setDeletingTripId(null);
     }
   };
 
@@ -1168,16 +1560,27 @@ export default function Trips() {
     };
   }, [selectedTrip?.id, selectedTrip?.status]);
 
-  const tabs = [
-    "All trips",
-    "Upcoming",
-    "Completed",
-    ...categories.map((item) => item[1]),
-  ];
   const detailTrip =
     (selectedTrip && trips.find((item) => item.id === selectedTrip.id)) ||
     selectedTrip;
   const detailHasAssignedVehicle = (detailTrip?.vehicles || []).length > 0;
+
+  useEffect(() => {
+    if (!sharingAssignment) return;
+    const assignment = detailTrip?.vehicles?.find(
+      (item) => item.id === sharingAssignment,
+    );
+    if (
+      !assignment ||
+      detailTrip?.status !== "in_progress" ||
+      !["outbound", "returning"].includes(assignment.journey_phase)
+    ) {
+      const timeout = window.setTimeout(stopLocationSharing, 0);
+      return () => window.clearTimeout(timeout);
+    }
+    return undefined;
+  }, [detailTrip, sharingAssignment]);
+
   const dateInput = (field, label, required = false) => (
     <label>
       {label}
@@ -1222,43 +1625,40 @@ export default function Trips() {
         </div>
       </header>
       <div className="portal-content trips-content">
-        <section className="trips-heading">
-          <div>
-            <p className="page-kicker">TRANSPORT OPERATIONS</p>
-            <h1>School Trips</h1>
-            <p>
-              Plan excursions, assign school vehicles and notify participating
-              families.
-            </p>
-          </div>
-          <div
-            className="trip-heading-actions"
-            style={{ display: "flex", gap: "0.5rem" }}
-          >
-            <button
-              type="button"
-              className="trip-secondary"
-              onClick={() => setModal("trip-docs")}
-              aria-haspopup="dialog"
-            >
-              <FiBookOpen /> Docs
-            </button>
-            <button
-              type="button"
-              className="trip-secondary"
-              onClick={() => setModal("vehicles")}
-            >
-              <FiTruck /> School vehicles
-            </button>
-            <button
-              type="button"
-              className="trip-primary"
-              onClick={() => startTrip()}
-            >
-              <FiPlus /> Add trip
-            </button>
-          </div>
-        </section>
+        <SchoolPageHeader
+          className="trips-heading"
+          actionsClassName="trip-heading-actions"
+          eyebrow="TRANSPORT OPERATIONS"
+          titleIcon={<span className="school-page-heading-icon"><FiMapPin /></span>}
+          title="School Trips"
+          description="Plan excursions, assign school vehicles and notify participating families."
+          actions={
+            <>
+              <button
+                type="button"
+                className="trip-secondary"
+                onClick={() => setModal("trip-docs")}
+                aria-haspopup="dialog"
+              >
+                <FiBookOpen /> Docs
+              </button>
+              <button
+                type="button"
+                className="trip-secondary"
+                onClick={() => setModal("vehicles")}
+              >
+                <FiTruck /> School vehicles
+              </button>
+              <button
+                type="button"
+                className="trip-primary"
+                onClick={() => startTrip()}
+              >
+                <FiPlus /> Add trip
+              </button>
+            </>
+          }
+        />
         {modal === "trip-docs" && (
           <div
             className="trip-modal-backdrop"
@@ -1311,9 +1711,9 @@ export default function Trips() {
                       sign up.
                     </li>
                     <li>
-                      Update the status as arrangements progress. Status
-                      changes are sent to participating families; a vehicle is
-                      required to confirm or start a trip.
+                      Update the status as arrangements progress. Status changes
+                      are sent to participating families; a vehicle is required
+                      to confirm or start a trip.
                     </li>
                   </ol>
                 </section>
@@ -1323,46 +1723,55 @@ export default function Trips() {
                     <div>
                       <dt>Draft</dt>
                       <dd>
-                        Saved for school staff to finish. It is unpublished
-                        and families cannot register.
+                        Saved for school staff to finish. It is unpublished and
+                        families cannot respond.
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Missed</dt>
+                      <dd>
+                        The trip did not begin: no vehicle location was shared
+                        within 15 minutes of scheduled departure. Guardians and
+                        school staff are notified.
                       </dd>
                     </div>
                     <div>
                       <dt>Registration open</dt>
                       <dd>
-                        Published and accepting registrations until the
+                        Published and accepting parent responses until the
                         registration deadline or capacity is reached.
                       </dd>
                     </div>
                     <div>
                       <dt>Confirmed</dt>
                       <dd>
-                        The trip is confirmed. It must have a vehicle and
-                        eligible learners (registered learners for free trips;
-                        paid learners for paid trips).
+                        Registration has closed and the school has confirmed
+                        the trip. Parent responses are no longer accepted.
+                        Payment is tracked separately.
                       </dd>
                     </div>
                     <div>
                       <dt>Preparing</dt>
                       <dd>
-                        The school is finalising arrangements. Eligible
-                        learners are required; a vehicle can still be added
-                        later.
+                        Registration has closed and the school is finalising
+                        arrangements. The minimum number of accepted learners
+                        and staffed vehicle assignments must be in place.
                       </dd>
                     </div>
                     <div>
                       <dt>In progress</dt>
                       <dd>
-                        The trip is underway. A vehicle and eligible learners
-                        are required; live vehicle tracking is available when
-                        location is being shared.
+                        The trip remains active while each assigned vehicle
+                        travels outbound, pauses at the destination, and
+                        returns. Assigned staff update those journey phases in
+                        the mobile app; the trip completes when every assigned
+                        vehicle has returned. Live tracking is shown only for
+                        recent GPS updates.
                       </dd>
                     </div>
                     <div>
                       <dt>Completed</dt>
-                      <dd>
-                        The trip has finished. This is a final status.
-                      </dd>
+                      <dd>The trip has finished. This is a final status.</dd>
                     </div>
                     <div>
                       <dt>Cancelled</dt>
@@ -1386,18 +1795,23 @@ export default function Trips() {
                     </div>
                     <div>
                       <dt>Maintenance</dt>
-                      <dd>Under maintenance and not available for new assignments.</dd>
+                      <dd>
+                        Under maintenance and not available for new assignments.
+                      </dd>
                     </div>
                     <div>
                       <dt>Inactive</dt>
-                      <dd>Not currently in service and unavailable for assignments.</dd>
+                      <dd>
+                        Not currently in service and unavailable for
+                        assignments.
+                      </dd>
                     </div>
                   </dl>
                 </section>
                 <p className="trip-docs-note">
-                  Trips without a vehicle can remain drafts or be marked
-                  preparing, but cannot be confirmed or started. Check vehicle
-                  capacity against the trip’s learner limits before publishing.
+                  Trips without a vehicle can remain drafts but cannot open
+                  registration. Vehicle capacity is applied to accepted
+                  learners, not the full invited cohort.
                 </p>
               </div>
             </section>
@@ -1420,16 +1834,8 @@ export default function Trips() {
             </span>
             <div>
               <small>Upcoming</small>
-              <strong>
-                {
-                  trips.filter((item) =>
-                    ["registration_open", "confirmed", "preparing"].includes(
-                      item.status,
-                    ),
-                  ).length
-                }
-              </strong>
-              <em>Registration / preparation</em>
+              <strong>{upcomingTripCount}</strong>
+              <em>Scheduled in the future</em>
             </div>
           </article>
           <article>
@@ -1437,14 +1843,9 @@ export default function Trips() {
               <FiUsers />
             </span>
             <div>
-              <small>Eligible learners</small>
-              <strong>
-                {trips.reduce(
-                  (sum, item) => sum + (item.registered_count || 0),
-                  0,
-                )}
-              </strong>
-              <em>Paid on paid trips; registered on free trips</em>
+              <small>Parent acceptances</small>
+              <strong>{eligibleRegistrationCount}</strong>
+              <em>Across all school trips</em>
             </div>
           </article>
           <article>
@@ -1478,21 +1879,6 @@ export default function Trips() {
           </div>
         )}
         <section className="trips-list-panel">
-          <nav className="trip-tabs" aria-label="Trip categories">
-            {tabs.map((tab) => (
-              <button
-                type="button"
-                key={tab}
-                className={activeTab === tab ? "active" : ""}
-                onClick={() => {
-                  setActiveTab(tab);
-                  setPage(1);
-                }}
-              >
-                {tab}
-              </button>
-            ))}
-          </nav>
           <div className="trips-toolbar">
             <label className="trips-search">
               <FiSearch />
@@ -1621,7 +2007,7 @@ export default function Trips() {
                       <th>Price</th>
                       <th>Status</th>
                       <th>Registration</th>
-                      <th>View</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1652,7 +2038,7 @@ export default function Trips() {
                               ? ` / ${trip.maximum_learners}`
                               : ""}
                           </strong>
-                          <small>registered</small>
+                          <small>parent accepted</small>
                         </td>
                         <td>
                           {(trip.vehicles || []).map((assignment) => (
@@ -1699,7 +2085,6 @@ export default function Trips() {
                             >
                               {availableTripStatuses(
                                 trip.status,
-                                (trip.vehicles || []).length > 0,
                               ).map((status) => (
                                 <option key={status} value={status}>
                                   {status.replaceAll("_", " ")}
@@ -1718,21 +2103,42 @@ export default function Trips() {
                         </td>
                         <td>
                           <span
-                            className={`trip-registration trip-registration-${registrationState(trip).toLowerCase().replaceAll(" ", "-")}`}
+                            className={`trip-registration trip-registration-${registrationState(trip, currentTime ?? 0).toLowerCase().replaceAll(" ", "-")}`}
                           >
-                            {registrationState(trip)}
+                            {registrationState(trip, currentTime ?? 0)}
                           </span>
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            className="trip-row-action"
-                            aria-label={`View details for ${trip.name}`}
-                            title="View trip details"
-                            onClick={() => setSelectedTrip(trip)}
-                          >
-                            <FiEye color="#17204d" aria-hidden="true" />
-                          </button>
+                          <div className="trip-row-actions">
+                            <button
+                              type="button"
+                              className="trip-row-action"
+                              aria-label={`View details for ${trip.name}`}
+                              title="View trip details"
+                              onClick={() => setSelectedTrip(trip)}
+                            >
+                              <FiEye color="#17204d" aria-hidden="true" />
+                            </button>
+                            {canDeleteTrips && (
+                              <button
+                                type="button"
+                                className="trip-row-action trip-row-action-delete"
+                                aria-label={`Delete ${trip.name}`}
+                                title={
+                                  trip.status === "in_progress"
+                                    ? "An active trip cannot be deleted"
+                                    : "Delete trip"
+                                }
+                                disabled={
+                                  trip.status === "in_progress" ||
+                                  deletingTripId === trip.id
+                                }
+                                onClick={() => void deleteTrip(trip)}
+                              >
+                                <FiTrash2 aria-hidden="true" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1755,7 +2161,7 @@ export default function Trips() {
                   <button
                     type="button"
                     disabled={currentPage <= 1}
-                    onClick={() => setPage((value) => value - 1)}
+                    onClick={() => setPage(currentPage - 1)}
                   >
                     ‹
                   </button>
@@ -1765,7 +2171,7 @@ export default function Trips() {
                   <button
                     type="button"
                     disabled={currentPage >= totalPages}
-                    onClick={() => setPage((value) => value + 1)}
+                    onClick={() => setPage(currentPage + 1)}
                   >
                     ›
                   </button>
@@ -1800,8 +2206,8 @@ export default function Trips() {
                   {editingTrip ? "Edit school trip" : "Create a school trip"}
                 </h2>
                 <p>
-                  Set event details, choose participating learners and allocate
-                  each group to a school vehicle.
+                  Set event details, choose a grade or all learners, and assign
+                  the selected group to school vehicles.
                 </p>
               </div>
               <button
@@ -1975,6 +2381,10 @@ export default function Trips() {
                       onChange={setTripField("maximum_learners")}
                       placeholder="No overall limit"
                     />
+                    <small className="trip-field-hint">
+                      Limits accepted learners; it does not limit how many
+                      families are invited.
+                    </small>
                   </label>
                   <label className="trip-form-full">
                     Payment notes
@@ -1993,29 +2403,19 @@ export default function Trips() {
                     </small>
                   </label>
                 </div>
-                {(minimumSeatShortfall > 0 || maximumSeatShortfall > 0) && (
+                {minimumSeatShortfall > 0 && (
                   <div className="trip-capacity-warning-panel" role="status">
                     <FiAlertCircle aria-hidden="true" />
                     <div>
-                      <strong>Vehicle capacity is below the trip target</strong>
-                      <p>
-                        {minimumSeatShortfall > 0 && (
-                          <>
-                            Add at least {minimumSeatShortfall} seat(s) to meet
-                            the minimum learner count.{" "}
-                          </>
-                        )}
-                        {maximumSeatShortfall > 0 && (
-                          <>
-                            Add at least {maximumSeatShortfall} seat(s) to cover
-                            maximum registrations.
-                          </>
-                        )}{" "}
-                        Select another vehicle in the participating learners
-                        section.
-                      </p>
-                    </div>
+                    <strong>Vehicle capacity is below the minimum learner count</strong>
+                    <p>
+                      Add at least {minimumSeatShortfall} seat(s) to meet the
+                      minimum. Vehicle capacity limits accepted registrations,
+                      not the number of families invited. Select another
+                      vehicle in the participating learners section.
+                    </p>
                   </div>
+                </div>
                 )}
               </section>
               <section className="trip-form-section">
@@ -2023,46 +2423,55 @@ export default function Trips() {
                   <div>
                     <h3>Participating learners</h3>
                     <p>
-                      {selectedCount} learners selected ·{" "}
-                      {selectedCapacity >= selectedCount
-                        ? `${selectedCapacity - selectedCount} assigned vehicle spaces remaining`
-                        : `${selectedCount - selectedCapacity} learner(s) over assigned vehicle capacity`}
+                      {selectedCount} learners will be invited ·{" "}
+                      {selectedCapacity} vehicle seat(s) available for accepted
+                      learners
                     </p>
                   </div>
                   <span>{resources.learners.length} school learners</span>
                 </div>
                 <div className="trip-learner-selectors">
                   <label>
-                    <strong> Select which students</strong>
-
+                    <strong>Who should be invited?</strong>
                     <small>
-                      {selectedCount
-                        ? `${selectedCount} learner${selectedCount === 1 ? "" : "s"} selected`
-                        : "Choose a grade to select its learners."}
+                      Parents of learners in this group will receive an
+                      invitation to accept or decline.
                     </small>
                     <select
-                      value={gradeFilter}
+                      disabled={
+                        Boolean(editingTrip) && editingTrip.status !== "draft"
+                      }
+                      value={tripForm.target_grade}
                       onChange={(event) =>
-                        selectLearnerGrade(event.target.value)
+                        setTripForm((current) => ({
+                          ...current,
+                          target_grade: event.target.value,
+                        }))
                       }
                     >
-                      <option value="all">All grades</option>
+                      <option value="all">All learners</option>
                       {grades.map((grade) => (
                         <option key={grade} value={grade}>
                           Grade {grade}
                         </option>
                       ))}
                     </select>
+                    {editingTrip && editingTrip.status !== "draft" && (
+                      <small>
+                        The invited group is locked after publishing to preserve
+                        parent responses and payment records.
+                      </small>
+                    )}
                   </label>
                   <div
                     className="trip-vehicle-multi-select"
                     role="group"
-                    aria-label="Vehicles for selected students"
+                    aria-label="Vehicles for invited learners"
                   >
-                    <strong>Vehicles for selected students</strong>
+                    <strong>Vehicles for invited learners</strong>
                     <small>
-                      Select one or more vehicles. Selected learners are
-                      distributed across them up to each vehicle’s capacity.
+                      Select vehicles. Learners who accept will be assigned
+                      automatically up to each vehicle’s capacity.
                     </small>
                     {resources.vehicles.filter(
                       (vehicle) =>
@@ -2090,13 +2499,7 @@ export default function Trips() {
                                     : learnerVehicleChoice.filter(
                                         (id) => id !== vehicle.id,
                                       );
-                                  assignLearnersToVehicles(
-                                    Object.keys(selectedLearners).filter(
-                                      (learnerId) =>
-                                        selectedLearners[learnerId],
-                                    ),
-                                    nextVehicleIds,
-                                  );
+                                  setLearnerVehicleChoice(nextVehicleIds);
                                 }}
                               />
                               <span>
@@ -2237,8 +2640,8 @@ export default function Trips() {
                   <div className="trip-no-vehicles">
                     {!editingTrip && (
                       <span>
-                        No vehicle is assigned. This trip will be saved as a
-                        draft until you assign a school vehicle.{" "}
+                        Assign a staffed vehicle before opening registration. A
+                        trip without a vehicle can only be saved as a draft.{" "}
                       </span>
                     )}
                     Select learners and assign them to vehicles to allocate a
@@ -2264,10 +2667,7 @@ export default function Trips() {
                       onChange={setTripField("status")}
                     >
                       {(editingTrip
-                        ? availableTripStatuses(
-                            editingTrip.status,
-                            (editingTrip.vehicles || []).length > 0,
-                          )
+                        ? availableTripStatuses(editingTrip.status)
                         : ["draft", "registration_open"]
                       ).map((status) => (
                         <option key={status} value={status}>
@@ -2301,7 +2701,7 @@ export default function Trips() {
                 <button
                   type="submit"
                   className="trip-primary"
-                  disabled={saving}
+                  disabled={saving || (Boolean(editingTrip) && !hasTripEdits)}
                 >
                   {saving
                     ? "Saving…"
@@ -2761,6 +3161,12 @@ export default function Trips() {
                 >
                   {detailTrip.status.replaceAll("_", " ")}
                 </span>
+                {detailTrip.status === "missed" && (
+                  <small className="trip-detail-status-note">
+                    No vehicle location was shared within 15 minutes of
+                    departure. Guardians and school staff were notified.
+                  </small>
+                )}
                 <button
                   type="button"
                   className="trip-secondary"
@@ -2770,7 +3176,7 @@ export default function Trips() {
                 </button>
                 {!detailHasAssignedVehicle && (
                   <small className="trip-detail-status-note">
-                    Without a vehicle, only draft or preparing is available.
+                    Assign a staffed vehicle before opening registration.
                   </small>
                 )}
               </div>
@@ -2804,11 +3210,15 @@ export default function Trips() {
                     <dd>{money(detailTrip)}</dd>
                   </div>
                   <div className="trip-detail-fact">
-                    <dt>
-                      {detailTrip.is_free
-                        ? "Registered learners"
-                        : "Paid learners"}
-                    </dt>
+                    <dt>Invited group</dt>
+                    <dd>
+                      {detailTrip.target_grade === "all"
+                        ? "All learners"
+                        : `Grade ${detailTrip.target_grade}`}
+                    </dd>
+                  </div>
+                  <div className="trip-detail-fact">
+                    <dt>Accepted learners</dt>
                     <dd>
                       {detailTrip.registered_count || 0}
                       {detailTrip.maximum_learners
@@ -2827,8 +3237,8 @@ export default function Trips() {
               <section className="trip-detail-overview trip-detail-transport">
                 <div className="trip-detail-section-heading">
                   <div>
-                    <h3>Vehicles & assigned learners</h3>
-                    <p>Transport and attendance for this trip</p>
+                    <h3>Vehicles & participating learners</h3>
+                    <p>Parent response, payment confirmation and attendance</p>
                   </div>
                   <span className="trip-detail-count">
                     {(detailTrip.vehicles || []).length} vehicles
@@ -2853,11 +3263,24 @@ export default function Trips() {
                           ? ` · Coordinator ${fullName(assignment.coordinator)}`
                           : ""}
                       </small>
+                      {["in_progress", "completed"].includes(
+                        detailTrip.status,
+                      ) && (
+                        <span className="trip-journey-phase">
+                          {journeyPhaseLabel(assignment.journey_phase)}
+                        </span>
+                      )}
                     </div>
                     <button
                       type="button"
                       className="trip-secondary trip-detail-share"
-                      disabled={detailTrip.status !== "in_progress"}
+                      disabled={
+                        detailTrip.status !== "in_progress" ||
+                        (["at_destination", "completed"].includes(
+                          assignment.journey_phase,
+                        ) &&
+                          sharingAssignment !== assignment.id)
+                      }
                       onClick={() =>
                         sharingAssignment === assignment.id
                           ? stopLocationSharing()
@@ -2866,7 +3289,11 @@ export default function Trips() {
                     >
                       {sharingAssignment === assignment.id
                         ? "Stop sharing"
-                        : "Share my location"}
+                        : assignment.journey_phase === "at_destination"
+                          ? "Sharing paused at destination"
+                          : assignment.journey_phase === "completed"
+                            ? "Vehicle returned"
+                            : "Share my location"}
                     </button>
                     {trackingError && sharingAssignment === null && (
                       <small
@@ -2878,7 +3305,22 @@ export default function Trips() {
                     )}
                     <small className="trip-detail-tracking">
                       {assignment.tracking
-                        ? `Last location ${new Date(assignment.tracking.recorded_at).toLocaleTimeString()}`
+                        ? `${
+                            isFreshTracking(assignment.tracking) &&
+                            ["outbound", "returning"].includes(
+                              assignment.journey_phase,
+                            )
+                              ? "Location updated"
+                              : "Last known location"
+                          } ${new Date(
+                            assignment.tracking.recorded_at,
+                          ).toLocaleTimeString()}${
+                            assignment.tracking.shared_by
+                              ? ` · Shared by ${fullName(
+                                  assignment.tracking.shared_by,
+                                )}`
+                              : ""
+                          }`
                         : "Location unavailable · No GPS update"}
                     </small>
                     {(assignment.learners || []).map((learner) => (
@@ -2890,42 +3332,53 @@ export default function Trips() {
                           {learner.child?.name} {learner.child?.lastname} ·{" "}
                           {learner.child?.grade || "Grade unset"}
                         </span>
-                        {detailTrip.is_free ? (
-                          <label className="trip-detail-registration-toggle">
-                            <input
-                              type="checkbox"
-                              checked={
-                                learner.registration_status === "registered" ||
-                                !learner.registration_status
-                              }
-                              onChange={(event) =>
+                        <span
+                          className={`trip-parent-response trip-parent-response-${learner.parent_response || "pending"}`}
+                        >
+                          {learner.parent_response === "accepted"
+                            ? "Attending"
+                            : learner.parent_response === "declined"
+                              ? "Not attending"
+                              : "Awaiting parent"}
+                        </span>
+                        {!detailTrip.is_free && (
+                          <span className="trip-payment-state">
+                            Payment:{" "}
+                            {(learner.payment_status || "unpaid").replaceAll(
+                              "_",
+                              " ",
+                            )}
+                            {learner.payment_method === "cash" &&
+                            learner.cash_payment_status === "pending"
+                              ? ` · cash requested (${cashRequestLabel(detailTrip, learner)})`
+                              : ""}
+                          </span>
+                        )}
+                        {learner.cash_payment_status === "pending" && (
+                          <div className="trip-cash-confirm-actions">
+                            <button
+                              type="button"
+                              className="trip-primary"
+                              onClick={() =>
                                 void updateTripLearner(detailTrip, learner, {
-                                  registration_status: event.target.checked
-                                    ? "registered"
-                                    : "cancelled",
-                                })
-                              }
-                            />
-                            <span>Registered</span>
-                          </label>
-                        ) : (
-                          <label className="trip-detail-payment-control">
-                            <span>Payment</span>
-                            <select
-                              aria-label={`Payment status for ${learner.child?.name}`}
-                              value={learner.payment_status || "unpaid"}
-                              onChange={(event) =>
-                                void updateTripLearner(detailTrip, learner, {
-                                  payment_status: event.target.value,
+                                  cash_payment_action: "confirm",
                                 })
                               }
                             >
-                              <option value="unpaid">Unpaid</option>
-                              <option value="deposit_paid">Deposit paid</option>
-                              <option value="paid">Paid</option>
-                              <option value="waived">Waived</option>
-                            </select>
-                          </label>
+                              Confirm cash received
+                            </button>
+                            <button
+                              type="button"
+                              className="trip-secondary"
+                              onClick={() =>
+                                void updateTripLearner(detailTrip, learner, {
+                                  cash_payment_action: "reject",
+                                })
+                              }
+                            >
+                              Reject request
+                            </button>
+                          </div>
                         )}
                         <select
                           aria-label={`Attendance for ${learner.child?.name}`}

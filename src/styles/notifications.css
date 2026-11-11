@@ -1,7 +1,13 @@
 .notifications-content {
-  min-height: calc(100svh - 48px);
-  background: #fff;
-  color: #334155;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 26px 20px 30px;
+  box-sizing: border-box;
+  background: #f7faff;
+  color: #172b4d;
 }
 .notifications-heading {
   display: flex;

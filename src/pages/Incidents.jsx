@@ -20,6 +20,7 @@ import {
   getCachedSchoolReportProfile,
 } from "../utils/schoolReport";
 import "../styles/incidents.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 const tabs = ["All Incidents", "Open", "In Progress", "Resolved"];
 const localDate = (date) =>
@@ -160,7 +161,10 @@ function Incidents() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(repliesCacheKey, JSON.stringify(incidentRepliesCache));
+      localStorage.setItem(
+        repliesCacheKey,
+        JSON.stringify(incidentRepliesCache),
+      );
     } catch (cacheError) {
       console.warn("Could not cache school incident responses:", cacheError);
     }
@@ -179,7 +183,10 @@ function Incidents() {
         if (!Array.isArray(data)) {
           throw new Error("Unable to load incident responses.");
         }
-        setIncidentRepliesCache((current) => ({ ...current, [incidentId]: data }));
+        setIncidentRepliesCache((current) => ({
+          ...current,
+          [incidentId]: data,
+        }));
         if (selectedIncidentRef.current?.source_id === incident.source_id) {
           setIncidentReplies(data);
         }
@@ -403,7 +410,7 @@ function Incidents() {
       const school = getCachedSchoolReportProfile();
       await downloadSchoolReport({
         records: filteredIncidents.map((incident) => ({
-          id: incident.id,
+          id: incident.id.slice(0, 13),
           title: incident.title,
           category: incident.category,
           reporter: incident.reporter,
@@ -442,46 +449,49 @@ function Incidents() {
   const statusPercent = (value) => percent(value, counts.total);
   return (
     <div className="portal-content incidents-content">
-      <section className="incidents-heading">
-        <div>
-          <p className="page-kicker">SAFETY & OPERATIONS</p>
-          <h1>Incidents & reports</h1>
-          <p>
-            Emergency alerts and student absence reports linked to this school.
-          </p>
-        </div>
-        <div className="incidents-actions">
-          <label className="incident-date-filter">
-            <FiCalendar />
-            <input
-              aria-label="From date"
-              type="date"
-              value={dateFrom}
-              onChange={(event) =>
-                updateFilters(() => setDateFrom(event.target.value))
-              }
-            />
-            <span>to</span>
-            <input
-              aria-label="To date"
-              type="date"
-              value={dateTo}
-              onChange={(event) =>
-                updateFilters(() => setDateTo(event.target.value))
-              }
-            />
-          </label>
-          <button
-            className="incident-primary"
-            type="button"
-            disabled={refreshing}
-            onClick={() => void loadIncidents(true)}
-          >
-            <FiRefreshCw className={refreshing ? "incident-refreshing" : ""} />{" "}
-            {refreshing ? "Refreshing..." : "Refresh data"}
-          </button>
-        </div>
-      </section>
+      <SchoolPageHeader
+        className="incidents-heading"
+        actionsClassName="incidents-actions"
+        eyebrow="SAFETY & OPERATIONS"
+        titleIcon={<span className="school-page-heading-icon"><FiAlertTriangle /></span>}
+        title="Incidents & reports"
+        description="Emergency alerts and student absence reports linked to this school."
+        actions={
+          <>
+            <label className="incident-date-filter">
+              <FiCalendar />
+              <input
+                aria-label="From date"
+                type="date"
+                value={dateFrom}
+                onChange={(event) =>
+                  updateFilters(() => setDateFrom(event.target.value))
+                }
+              />
+              <span>to</span>
+              <input
+                aria-label="To date"
+                type="date"
+                value={dateTo}
+                onChange={(event) =>
+                  updateFilters(() => setDateTo(event.target.value))
+                }
+              />
+            </label>
+            <button
+              className="incident-primary"
+              type="button"
+              disabled={refreshing}
+              onClick={() => void loadIncidents(true)}
+            >
+              <FiRefreshCw
+                className={refreshing ? "incident-refreshing" : ""}
+              />{" "}
+              {refreshing ? "Refreshing..." : "Refresh data"}
+            </button>
+          </>
+        }
+      />
 
       {error && (
         <div className="incident-error" role="alert">
@@ -625,7 +635,7 @@ function Incidents() {
                 {pageIncidents.map((incident) => {
                   const Icon = categoryIcon(incident.category);
                   return (
-                    <tr key={incident.id}>
+                    <tr key={incident.id.slice(0, 13)}>
                       <td>
                         <strong>{incident.id.slice(0, 13)}</strong>
                         <small>{incident.title}</small>
@@ -833,10 +843,36 @@ function Incidents() {
             aria-modal="true"
             aria-labelledby="incident-detail-title"
           >
-            <header>
-              <div>
-                <p>{selectedIncident.category}</p>
+            <header className="incident-modal-header">
+              <div className="incident-modal-heading">
+                <span
+                  className={`incident-modal-category ${categoryTone(selectedIncident.category)}`}
+                >
+                  {(() => {
+                    const CategoryIcon = categoryIcon(
+                      selectedIncident.category,
+                    );
+                    return <CategoryIcon aria-hidden="true" />;
+                  })()}
+                  {selectedIncident.category}
+                </span>
                 <h2 id="incident-detail-title">{selectedIncident.title}</h2>
+                <div className="incident-modal-badges">
+                  <span
+                    className={`incident-severity-badge ${String(selectedIncident.severity || "").toLowerCase()}`}
+                  >
+                    {selectedIncident.severity} severity
+                  </span>
+                  <span
+                    className={`incident-status-badge ${String(
+                      selectedIncident.status || "",
+                    )
+                      .toLowerCase()
+                      .replaceAll(" ", "-")}`}
+                  >
+                    {selectedIncident.status}
+                  </span>
+                </div>
               </div>
               <button
                 type="button"
@@ -846,116 +882,131 @@ function Incidents() {
                 <FiX />
               </button>
             </header>
-            <p className="incident-modal-description">
-              {selectedIncident.description ||
-                "No additional details were provided."}
-            </p>
-            <dl>
-              <div>
-                <dt>Reported by</dt>
-                <dd>
-                  {selectedIncident.reporter} · {selectedIncident.reporter_role}
-                </dd>
-              </div>
-              <div>
-                <dt>Student</dt>
-                <dd>{selectedIncident.child_name || "Not associated"}</dd>
-              </div>
-              <div>
-                <dt>Route</dt>
-                <dd>{selectedIncident.route_name || "Not associated"}</dd>
-              </div>
-              <div>
-                <dt>Location</dt>
-                <dd>{selectedIncident.location || "Not specified"}</dd>
-              </div>
-              <div>
-                <dt>Severity</dt>
-                <dd>{selectedIncident.severity}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>{selectedIncident.status}</dd>
-              </div>
-              <div>
-                <dt>Reported</dt>
-                <dd>
-                  {formatDate(selectedIncident.reported_at)}{" "}
-                  {formatTime(selectedIncident.reported_at)}
-                </dd>
-              </div>
-              {selectedIncident.absence_date && (
-                <div>
-                  <dt>Absence date</dt>
-                  <dd>{formatDate(selectedIncident.absence_date)}</dd>
-                </div>
-              )}
-            </dl>
-            {selectedIncident.source === "incident_report" && (
-              <section className="incident-response">
-                <div className="incident-response-heading">
-                  <h3>Responses</h3>
-                  <span>
-                    {selectedIncident.recipient_type === "support"
-                      ? "Support only"
-                      : "School and Support"}
-                  </span>
-                </div>
-                {repliesLoading ? (
-                  <p className="incident-response-empty">Loading responses…</p>
-                ) : incidentReplies.length ? (
-                  <div className="incident-response-list">
-                    {incidentReplies.map((reply) => (
-                      <article className="incident-response-item" key={reply.id}>
-                        <div>
-                          <strong>{reply.users?.name || "Incident team"}</strong>
-                          <time>{new Date(reply.created_at).toLocaleString()}</time>
-                        </div>
-                        <p>{reply.body}</p>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="incident-response-empty">No responses yet.</p>
-                )}
-                {selectedIncident.recipient_type === "support" ? (
-                  <p className="incident-response-note">
-                    This report was sent to Support. The school can view responses, but only Support can reply.
-                  </p>
-                ) : selectedIncident.status === "Resolved" ? (
-                  <p className="incident-response-note">
-                    This report is closed and can no longer receive responses.
-                  </p>
-                ) : (
-                  <form
-                    className="incident-response-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void sendIncidentReply();
-                    }}
-                  >
-                    <label htmlFor="incident-response-draft">
-                      Reply to the reporter
-                    </label>
-                    <textarea
-                      id="incident-response-draft"
-                      value={replyDraft}
-                      onChange={(event) => setReplyDraft(event.target.value)}
-                      placeholder="Write an update or request more information..."
-                      maxLength={3000}
-                      rows={4}
-                      disabled={replySaving}
-                    />
-                    <button
-                      type="submit"
-                      disabled={!replyDraft.trim() || replySaving || repliesLoading}
-                    >
-                      {replySaving ? "Sending..." : "Send response"}
-                    </button>
-                  </form>
-                )}
+            <div className="incident-modal-content">
+              <section className="incident-description-card">
+                <h3>Report details</h3>
+                <p className="incident-modal-description">
+                  {selectedIncident.description ||
+                    "No additional details were provided."}
+                </p>
               </section>
-            )}
+              <dl className="incident-detail-grid">
+                <div>
+                  <dt>Reported by</dt>
+                  <dd>
+                    {selectedIncident.reporter} ·{" "}
+                    {selectedIncident.reporter_role}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Student</dt>
+                  <dd>{selectedIncident.child_name || "Not associated"}</dd>
+                </div>
+                <div>
+                  <dt>Route</dt>
+                  <dd>{selectedIncident.route_name || "Not associated"}</dd>
+                </div>
+                <div>
+                  <dt>Location</dt>
+                  <dd>{selectedIncident.location || "Not specified"}</dd>
+                </div>
+                <div>
+                  <dt>Reported</dt>
+                  <dd>
+                    {formatDate(selectedIncident.reported_at)}{" "}
+                    {formatTime(selectedIncident.reported_at)}
+                  </dd>
+                </div>
+                {selectedIncident.absence_date && (
+                  <div>
+                    <dt>Absence date</dt>
+                    <dd>{formatDate(selectedIncident.absence_date)}</dd>
+                  </div>
+                )}
+              </dl>
+              {selectedIncident.source === "incident_report" && (
+                <section className="incident-response">
+                  <div className="incident-response-heading">
+                    <div>
+                      <h3>Responses</h3>
+                      <p>Updates and follow-up for this report</p>
+                    </div>
+                    <span>
+                      {selectedIncident.recipient_type === "support"
+                        ? "Support only"
+                        : "School and Support"}
+                    </span>
+                  </div>
+                  {repliesLoading ? (
+                    <p className="incident-response-empty">
+                      Loading responses…
+                    </p>
+                  ) : incidentReplies.length ? (
+                    <div className="incident-response-list">
+                      {incidentReplies.map((reply) => (
+                        <article
+                          className="incident-response-item"
+                          key={reply.id}
+                        >
+                          <div>
+                            <strong>
+                              {reply.users?.name || "Incident team"}
+                            </strong>
+                            <time>
+                              {new Date(reply.created_at).toLocaleString()}
+                            </time>
+                          </div>
+                          <p>{reply.body}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="incident-response-empty">No responses yet.</p>
+                  )}
+                  {selectedIncident.recipient_type === "support" ? (
+                    <p className="incident-response-note">
+                      This report was sent to Support. The school can view
+                      responses, but only Support can reply.
+                    </p>
+                  ) : selectedIncident.status === "Resolved" ? (
+                    <p className="incident-response-note">
+                      Incident #{selectedIncident.source_id} is closed and can
+                      no longer receive responses. It will be automatically
+                      removed 48 hours after closing.
+                    </p>
+                  ) : (
+                    <form
+                      className="incident-response-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void sendIncidentReply();
+                      }}
+                    >
+                      <label htmlFor="incident-response-draft">
+                        Reply to the reporter
+                      </label>
+                      <textarea
+                        id="incident-response-draft"
+                        value={replyDraft}
+                        onChange={(event) => setReplyDraft(event.target.value)}
+                        placeholder="Write an update or request more information..."
+                        maxLength={3000}
+                        rows={4}
+                        disabled={replySaving}
+                      />
+                      <button
+                        type="submit"
+                        disabled={
+                          !replyDraft.trim() || replySaving || repliesLoading
+                        }
+                      >
+                        {replySaving ? "Sending..." : "Send response"}
+                      </button>
+                    </form>
+                  )}
+                </section>
+              )}
+            </div>
           </section>
         </div>
       )}

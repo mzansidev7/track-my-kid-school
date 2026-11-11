@@ -3,6 +3,17 @@
 }
 :root {
   --portal-sidebar-width: max(15vw, 184px);
+  --portal-nav-bg: #11115b;
+  --portal-nav-surface: #25236f;
+  --portal-nav-active: #6940dc;
+  --portal-nav-active-dark: #5930c8;
+  --portal-nav-tint: #e2ddff;
+  --portal-accent: #6940dc;
+  --portal-accent-dark: #5225bf;
+  --portal-accent-soft: #f0eaff;
+  --portal-page-bg: #f6f5fb;
+  --portal-ink: #211d4d;
+  --portal-border: #e7e4f0;
   --text: #6b6375;
   --text-h: #08060d;
   --bg: #fff;
@@ -704,14 +715,14 @@ body {
   min-height: 100svh;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(440px, 0.82fr);
-  background: #f4f7f5;
+  background: #f4f2ff;
   text-align: left;
 }
 
 .auth-intro {
   padding: clamp(40px, 8vw, 112px);
-  background: #0f766e;
-  color: #ecfdf5;
+  background: linear-gradient(145deg, #11115b 0%, #25236f 62%, #5930c8 100%);
+  color: #f4f1ff;
   position: relative;
   overflow: hidden;
 }
@@ -766,7 +777,7 @@ body {
 }
 .intro-copy {
   max-width: 480px;
-  color: #ccfbf1;
+  color: #e2ddff;
   font-size: 18px;
   line-height: 1.6;
 }
@@ -785,7 +796,7 @@ body {
   margin: 46px 0 0;
   display: grid;
   gap: 18px;
-  color: #ccfbf1;
+  color: #e2ddff;
   font-size: 15px;
 }
 .benefit-list li {
@@ -794,13 +805,22 @@ body {
   align-items: center;
 }
 .benefit-list svg {
-  color: #fbbf24;
+  color: #ffbd24;
 }
 .auth-panel {
   align-self: center;
   width: min(100% - 56px, 520px);
   margin: auto;
-  padding: 42px 0;
+  box-sizing: border-box;
+  padding: 42px 36px;
+  border: 1px solid #e6e1f7;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(37, 35, 111, 0.1);
+  color: #11115b;
+}
+.auth-panel-head .eyebrow {
+  color: #5930c8;
 }
 .register-shell {
   width: 100vw;
@@ -809,7 +829,7 @@ body {
   margin-left: calc(50% - 50vw);
   grid-template-columns: minmax(0, 1fr) minmax(440px, 0.82fr);
   overflow: hidden;
-  background: #f4f7f5;
+  background: #f4f2ff;
 }
 .register-shell .register-intro {
   display: block;
@@ -823,6 +843,10 @@ body {
   -ms-overflow-style: none;
   box-sizing: border-box;
   padding: 42px max(28px, calc((100% - 520px) / 2));
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: none;
 }
 .register-shell .registration-panel::-webkit-scrollbar {
   display: none;
@@ -833,6 +857,7 @@ body {
   letter-spacing: -1px;
   margin: 0 0 12px;
   font-weight: 800;
+  color: gray;
 }
 .auth-panel-head > p:last-child {
   color: #64748b;
@@ -863,8 +888,8 @@ body {
     box-shadow 0.2s;
 }
 .input-wrap:focus-within {
-  border-color: #0f766e;
-  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
+  border-color: #6940dc;
+  box-shadow: 0 0 0 4px rgba(105, 64, 220, 0.12);
 }
 .input-wrap svg {
   color: #64748b;
@@ -894,10 +919,10 @@ body {
 }
 .password-toggle:hover,
 .password-toggle:focus-visible {
-  color: #0f766e;
+  color: #5930c8;
 }
 .password-toggle:focus-visible {
-  outline: 2px solid #0f766e;
+  outline: 2px solid #6940dc;
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -929,7 +954,7 @@ body {
   gap: 10px;
   border: 0;
   border-radius: 10px;
-  background: #0f766e;
+  background: linear-gradient(90deg, #6940dc 0%, #5930c8 100%);
   color: #fff;
   padding: 15px 20px;
   font-size: 14px;
@@ -937,7 +962,7 @@ body {
   cursor: pointer;
 }
 .primary-button:hover {
-  background: #115e59;
+  background: #4b24b5;
 }
 .primary-button:disabled {
   opacity: 0.65;
@@ -950,7 +975,7 @@ body {
   margin-top: 24px;
 }
 .auth-switch a {
-  color: #0f766e;
+  color: #5930c8;
   font-weight: 800;
   text-decoration: none;
 }
@@ -969,10 +994,10 @@ body {
   color: #047857;
 }
 .auth-secondary-button {
-  border: 1px solid #d8e1df;
+  border: 1px solid #d8d2f0;
   border-radius: 10px;
   background: #fff;
-  color: #0f766e;
+  color: #5930c8;
   padding: 13px 20px;
   font-size: 13px;
   font-weight: 800;
@@ -1232,7 +1257,7 @@ body {
   }
   .auth-panel {
     width: min(100% - 40px, 520px);
-    padding: 42px 0 54px;
+    padding: 42px 28px 54px;
   }
   .register-shell .registration-panel {
     width: min(100% - 40px, 520px);
@@ -1426,14 +1451,18 @@ code {
   font-size: 10px;
 }
 
+.route-list {
+  overflow-x: auto;
+}
 .route-list-header,
 .route-card {
   display: grid;
   grid-template-columns:
-    42px minmax(100px, 1.15fr) minmax(130px, 1.2fr)
-    70px 58px minmax(105px, 1fr) 84px 24px;
+    minmax(120px, 1.15fr) minmax(140px, 1.3fr) 64px 56px
+    minmax(110px, 1fr) 80px;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-width: 620px;
 }
 .route-list-header {
   padding: 10px 7px;
@@ -1449,9 +1478,16 @@ code {
   border-bottom: 1px solid #eef2f6;
   text-align: left;
 }
+.route-card-route {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
 .route-card-icon {
   width: 34px;
   height: 34px;
+  flex: 0 0 34px;
 }
 .route-card-icon strong {
   color: inherit;
@@ -1508,20 +1544,4 @@ code {
 .route-status.active {
   background: #dcfce7;
   color: #16834a;
-}
-.route-more {
-  justify-self: center;
-}
-@media (max-width: 900px) {
-  .route-list-header,
-  .route-card {
-    grid-template-columns: 38px minmax(100px, 1fr) 60px 50px 84px 22px;
-  }
-  .route-list-header span:nth-child(3),
-  .route-list-header span:nth-child(4),
-  .route-list-header span:nth-child(5),
-  .route-card .route-card-direction,
-  .route-card .route-card-assignment {
-    display: none;
-  }
 }

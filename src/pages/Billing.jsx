@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { FiCheck, FiCreditCard, FiFileText, FiRefreshCw } from "react-icons/fi";
 import { apiRequest } from "../api";
 import "../styles/billing.css";
+import SchoolPageHeader from "../components/SchoolPageHeader";
 
 const readSession = () => {
   try {
@@ -96,7 +97,7 @@ export default function Billing() {
   const current = billing?.subscription;
   const canResumeCheckout =
     current?.billing_status === "pending" &&
-    ["stripe", "paystack"].includes(current.billing_provider);
+    current.billing_provider === "paystack";
   const isSelectedCheckout =
     canResumeCheckout &&
     current?.plan_slug === selectedPlan &&
@@ -213,16 +214,18 @@ export default function Billing() {
 
   return (
     <main className="billing-page">
-      <header className="billing-heading">
-        <div>
-          <span className="billing-eyebrow">SCHOOL ACCOUNT</span>
-          <h1>Subscription &amp; Billing</h1>
-          <p>Simple plans for your school, billed in South African rand.</p>
-        </div>
-        <button className="billing-refresh" type="button" onClick={() => void refresh()}>
+      <SchoolPageHeader
+        className="billing-heading"
+        eyebrow="SCHOOL ACCOUNT"
+        titleIcon={<span className="school-page-heading-icon"><FiCreditCard /></span>}
+        title="Subscription & Billing"
+        description="Simple plans for your school, billed in South African rand."
+        actions={
+          <button className="billing-refresh" type="button" onClick={() => void refresh()}>
           <FiRefreshCw /> Refresh
-        </button>
-      </header>
+          </button>
+        }
+      />
 
       {approvalPending && !hasPaidSubscription && (
         <div className="billing-alert warning" role="status">
@@ -421,12 +424,12 @@ export default function Billing() {
             <p>
               {billing?.payment_provider === "paystack"
                 ? "Paystack card payments are one-time. Renew manually before the paid period ends."
-                : "Card payments renew automatically. EFT is confirmed by our team."}
+                : "Card checkout uses Paystack. EFT is confirmed by our team."}
             </p>
           </div>
         </div>
         <div className="billing-methods">
-          <label><input type="radio" name="payment-method" value="card" checked={method === "card"} onChange={() => setMethod("card")} /><FiCreditCard /> Card · {billing?.payment_provider === "paystack" ? "Paystack" : "Stripe"}</label>
+          <label><input type="radio" name="payment-method" value="card" checked={method === "card"} onChange={() => setMethod("card")} /><FiCreditCard /> Card · Paystack</label>
           <label><input type="radio" name="payment-method" value="bank_transfer" checked={method === "bank_transfer"} onChange={() => setMethod("bank_transfer")} /><FiFileText /> Invoice · EFT</label>
         </div>
         {method === "bank_transfer" && (
@@ -439,9 +442,6 @@ export default function Billing() {
             {!bank.bank_name && !bank.account_number && <p>Bank account details have not been configured yet. Please contact Track My Kid support before requesting an EFT invoice.</p>}
             {pendingInvoice && <p>Invoice {pendingInvoice.invoice_number} is awaiting payment. Use that invoice number as your EFT reference.</p>}
           </div>
-        )}
-        {current?.billing_status === "active" && current.billing_provider === "stripe" && (
-          <p className="billing-note">Your card plan is active and set to {current.auto_renew ? "renew automatically" : "end after this paid period"}.</p>
         )}
         {current?.billing_status === "active" && current.billing_provider === "paystack" && (
           <p className="billing-note">

@@ -1,13 +1,13 @@
 .parents-content {
-  min-height: calc(100svh - 48px);
-  background:
-    radial-gradient(
-      circle at 3% 0%,
-      rgba(226, 232, 240, 0.55),
-      transparent 28%
-    ),
-    linear-gradient(180deg, #f8fafc 0%, #ffffff 38%);
-  color: #334155;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 26px 20px 30px;
+  box-sizing: border-box;
+  background: #f7faff;
+  color: #172b4d;
 }
 .parents-heading {
   display: flex;
@@ -149,6 +149,18 @@
 }
 .parent-metrics em.neutral {
   color: #64748b;
+}
+.parent-legend .online-dot {
+  background: #16a34a;
+}
+.parent-legend .offline-dot {
+  background: #94a3b8;
+}
+.parent-presence-note {
+  display: block;
+  padding: 3px 0 0 18px;
+  color: #64748b;
+  font-size: 10px;
 }
 .parents-layout {
   display: grid;

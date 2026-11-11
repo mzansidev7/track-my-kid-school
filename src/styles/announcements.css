@@ -1,7 +1,13 @@
 .announcements-content {
-  min-height: calc(100svh - 48px);
-  background: #fff;
-  color: #334155;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 26px 20px 30px;
+  box-sizing: border-box;
+  background: #f7faff;
+  color: #172b4d;
 }
 .announcements-heading {
   display: flex;
@@ -11,6 +17,9 @@
 }
 .announcements-heading > div {
   margin-right: auto;
+}
+.announcements-heading .school-page-heading-actions {
+  margin-right: 0;
 }
 .announcements-heading h1 {
   margin: 0 0 5px;
@@ -31,6 +40,10 @@
   font-size: 10px;
 }
 .announcements-date {
+  box-sizing: border-box;
+  height: 35px;
+  min-height: 35px;
+  padding: 0 12px;
   border: 1px solid #dce4eb;
   color: #334155;
 }
