@@ -1,10 +1,9 @@
 import { clearSupabaseSession } from "./supabaseClient";
 
 const API_URL = (
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV
-    ? "http://localhost:3000"
-    : "https://track-my-kid-server-1.onrender.com")
+  import.meta.env.DEV
+    ? import.meta.env.VITE_API_URL || "http://localhost:3000"
+    : "https://track-my-kid-server.onrender.com"
 ).replace(/\/$/, "");
 
 let expiredToken = null;
@@ -14,7 +13,10 @@ const getRawBearerToken = (headers = {}) => {
   )?.[1];
   if (typeof authorization !== "string") return "";
 
-  let token = authorization.trim().replace(/^(?:Bearer\s+)+/i, "").trim();
+  let token = authorization
+    .trim()
+    .replace(/^(?:Bearer\s+)+/i, "")
+    .trim();
   if (
     (token.startsWith('"') && token.endsWith('"')) ||
     (token.startsWith("'") && token.endsWith("'"))
@@ -28,7 +30,10 @@ const isJwt = (token) =>
   typeof token === "string" &&
   token.split(".").length === 3 &&
   token.split(".").every((part) => /^[A-Za-z0-9_-]+$/.test(part)) &&
-  token.split(".").slice(0, 2).every((part) => part.length % 4 !== 1);
+  token
+    .split(".")
+    .slice(0, 2)
+    .every((part) => part.length % 4 !== 1);
 
 const getStoredSchoolToken = () => {
   try {
