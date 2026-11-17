@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FiArrowRight, FiLock, FiMail } from "react-icons/fi";
+import { FiArrowRight, FiEye, FiEyeOff, FiLock, FiMail } from "react-icons/fi";
 import { apiRequest, isJwt } from "../api";
 import { setSupabaseSession } from "../supabaseClient";
 import logo from "../assets/images/logo.png";
@@ -13,6 +13,7 @@ export default function Login() {
   const [otpLoading, setOtpLoading] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
@@ -270,12 +271,23 @@ export default function Login() {
               <span className="input-wrap">
                 <FiLock />
                 <input
-                  type="password"
+                  id="school-login-password"
+                  type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={update("password")}
                   required
                   placeholder="Enter your password"
                 />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  aria-controls="school-login-password"
+                >
+                  {showPassword ? <FiEyeOff /> : <FiEye />}
+                </button>
               </span>
             </label>
             {error && <div className="form-error">{error}</div>}

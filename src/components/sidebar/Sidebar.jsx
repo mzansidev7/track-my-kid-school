@@ -447,7 +447,9 @@ export default function Sidebar() {
   return (
     <aside className="portal-sidebar">
       <div className="sidebar-brand">
-        <img className="sidebar-brand-logo" src={logo} alt="Track My Kid" />
+        <div className="sidebar-brand-mark">
+          <img className="sidebar-brand-logo" src={logo} alt="" />
+        </div>
         <div>
           <strong>Track My Kid</strong>
           <span>School Portal</span>
@@ -469,6 +471,8 @@ export default function Sidebar() {
             <NavLink
               key={path}
               to={path}
+              title={title}
+              aria-label={title}
               className={({ isActive }) =>
                 `portal-nav-link${isActive ? " active" : ""}`
               }

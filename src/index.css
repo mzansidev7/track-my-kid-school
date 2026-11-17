@@ -2,7 +2,7 @@
   display: none;
 }
 :root {
-  --portal-sidebar-width: max(15vw, 184px);
+  --portal-sidebar-width: 256px;
   --portal-nav-bg: #11115b;
   --portal-nav-surface: #25236f;
   --portal-nav-active: #6940dc;

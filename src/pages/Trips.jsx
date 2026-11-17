@@ -1318,12 +1318,10 @@ function AdminTrips() {
               : [...current.vehicles, savedVehicle],
         }));
       updateVehicleInResources(vehicle);
-      if (vehicleAssets.photos.length || vehicleAssets.documents.length) {
+      if (vehicleAssets.photos.length) {
+        const photosToUpload = [...vehicleAssets.photos];
         const assets = new FormData();
-        vehicleAssets.photos.forEach((file) => assets.append("photos", file));
-        vehicleAssets.documents.forEach((file) =>
-          assets.append("documents", file),
-        );
+        photosToUpload.forEach((file) => assets.append("photos", file));
         try {
           vehicle = await apiRequest(`/school/vehicles/${vehicle.id}/assets`, {
             method: "POST",
@@ -1337,7 +1335,37 @@ function AdminTrips() {
             { cause: assetError },
           );
         }
+        setVehicleAssets((current) => ({
+          ...current,
+          photos: current.photos.filter((file) => !photosToUpload.includes(file)),
+        }));
         updateVehicleInResources(vehicle);
+      }
+      for (const file of [...vehicleAssets.documents]) {
+        const document = new FormData();
+        document.append("file", file);
+        document.append("document_type", "Vehicle supporting document");
+        document.append("title", file.name);
+        try {
+          await apiRequest(
+            `/school/vehicles/${vehicle.id}/compliance-documents`,
+            {
+              method: "POST",
+              headers: { Authorization: `****** || ""}` },
+              body: document,
+            },
+          );
+        } catch (documentError) {
+          setEditingVehicle(vehicle);
+          throw new Error(
+            `Vehicle saved, but “${file.name}” could not be submitted. Check Compliance Reviews before retrying, as earlier files may already have been submitted. ${documentError.message || ""}`,
+            { cause: documentError },
+          );
+        }
+        setVehicleAssets((current) => ({
+        ...current,
+        documents: current.documents.filter((selected) => selected !== file),
+        }));
       }
       setVehicleForm(emptyVehicle);
       setVehicleAssets({ photos: [], documents: [] });
@@ -2924,7 +2952,8 @@ function AdminTrips() {
                     <div>
                       <h3>Photos & documents</h3>
                       <p>
-                        Add images and compliance documents for quick reference.
+                        Photos are saved with the vehicle. Documents are
+                        submitted privately for government review.
                       </p>
                     </div>
                   </div>
@@ -2965,7 +2994,9 @@ function AdminTrips() {
                     </label>
                     <label className="trip-vehicle-upload-card">
                       <strong>Vehicle documents</strong>
-                      <small>PDF or image · multiple allowed</small>
+                      <small>
+                        PDF or image · privately submitted for review
+                      </small>
                       {editingVehicle?.documents?.length > 0 && (
                         <span className="trip-vehicle-assets-current">
                           {editingVehicle.documents.map((document, index) => (
@@ -2982,7 +3013,7 @@ function AdminTrips() {
                       )}
                       <input
                         type="file"
-                        accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+                        accept="application/pdf,image/jpeg,image/png,image/webp"
                         multiple
                         onChange={(event) =>
                           setVehicleAssets((current) => ({
